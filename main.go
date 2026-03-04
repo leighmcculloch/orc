@@ -17,16 +17,16 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		printUsage()
-		os.Exit(1)
+	cmd := ""
+	args := os.Args[1:]
+
+	if len(args) > 0 {
+		cmd = args[0]
+		args = args[1:]
 	}
 
-	cmd := os.Args[1]
-	args := os.Args[2:]
-
 	switch cmd {
-	case "run":
+	case "", "run":
 		cmdRun()
 	case "add":
 		cmdAdd(args)
@@ -44,7 +44,7 @@ func main() {
 		cmdInit()
 	case "stop":
 		cmdStop()
-	case "help":
+	case "help", "--help", "-h":
 		printUsage()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)

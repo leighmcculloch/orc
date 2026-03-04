@@ -16,6 +16,9 @@ Orc is a terminal app that manages a fleet of Claude Code processes — bringing
 > [!NOTE]
 > Built using AI. This is an experimental tool. Use at your own risk.
 
+> [!WARNING]
+> Orc runs Claude Code with `--dangerously-skip-permissions`. This means Claude Code agents will execute commands, write files, and make changes **without asking for confirmation**. Only run orc in environments where you are comfortable with fully autonomous agent operation.
+
 ## Quick Start
 
 ```bash

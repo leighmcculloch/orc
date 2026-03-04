@@ -85,7 +85,8 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 		runDir, _ = os.Getwd()
 	}
 
-	args := []string{"--print", "--output-format", "json", prompt}
+	mcpConfig := os.ExpandEnv("$HOME/.claude/mcp.json")
+	args := []string{"--print", "--output-format", "json", "--dangerously-skip-permissions", "--mcp-config", mcpConfig, prompt}
 	cmd := exec.CommandContext(ctx, claudePath, args...)
 	cmd.Dir = runDir
 
@@ -182,7 +183,8 @@ func parseSessionID(output []byte) string {
 
 // requestReport runs a follow-up claude invocation with --resume to ask for a report.
 func requestReport(ctx context.Context, claudePath string, runDir string, sessionID string, logFn func(string, ...any)) string {
-	args := []string{"--print", "--resume", sessionID, "Write a brief summary report (2-4 sentences) of what you just accomplished."}
+	mcpConfig := os.ExpandEnv("$HOME/.claude/mcp.json")
+	args := []string{"--print", "--resume", sessionID, "--dangerously-skip-permissions", "--mcp-config", mcpConfig, "Write a brief summary report (2-4 sentences) of what you just accomplished."}
 	cmd := exec.CommandContext(ctx, claudePath, args...)
 	cmd.Dir = runDir
 

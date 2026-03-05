@@ -1,16 +1,20 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/leighmcculloch/orc/claude"
 	"github.com/leighmcculloch/orc/config"
 	"github.com/leighmcculloch/orc/ipc"
 	"github.com/leighmcculloch/orc/logging"
 	"github.com/leighmcculloch/orc/orchestrator"
+	"github.com/leighmcculloch/orc/pick"
 	"github.com/leighmcculloch/orc/report"
 	"github.com/leighmcculloch/orc/state"
 	"github.com/leighmcculloch/orc/tui"
@@ -263,11 +267,15 @@ func printTasks(tasks []state.Task) {
 }
 
 func cmdRemove(args []string) {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: orc remove <task-id>")
-		os.Exit(1)
+	taskID := ""
+	if len(args) > 0 {
+		taskID = args[0]
+	} else {
+		taskID = pickTask("Select task to remove:")
 	}
-	taskID := args[0]
+	if taskID == "" {
+		return
+	}
 
 	if ipc.IsRunning() {
 		payload := ipc.RemoveTaskPayload{TaskID: taskID}
@@ -342,6 +350,8 @@ func cmdStatus() {
 func cmdLog(args []string) {
 	date := time.Now().Format("2006-01-02")
 	follow := false
+	taskID := ""
+	taskMode := false
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -353,18 +363,35 @@ func cmdLog(args []string) {
 		case "--follow", "-f":
 			follow = true
 		case "--task", "-t":
-			if i+1 < len(args) {
-				taskID := args[i+1]
-				logPath := logging.TaskLogPath(taskID)
-				data, err := os.ReadFile(logPath)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "error reading task log: %v\n", err)
-					os.Exit(1)
-				}
-				fmt.Print(string(data))
-				return
+			taskMode = true
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				taskID = args[i+1]
+				i++
 			}
 		}
+	}
+
+	if taskMode {
+		if taskID == "" {
+			taskID = pickTask("Select task to view logs:")
+		}
+		if taskID == "" {
+			return
+		}
+		logPath := filepath.Join(config.OrcDir(), "workdirs", taskID, "output.log")
+
+		if follow {
+			streamFile(logPath)
+			return
+		}
+
+		data, err := os.ReadFile(logPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "no output log for task %s\n", taskID)
+			os.Exit(1)
+		}
+		fmt.Print(string(data))
+		return
 	}
 
 	if follow {
@@ -387,6 +414,29 @@ func cmdLog(args []string) {
 	}
 	for _, line := range lines {
 		fmt.Println(line)
+	}
+}
+
+func streamFile(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		fmt.Println(scanner.Text())
+	}
+
+	// Tail the file
+	for {
+		time.Sleep(500 * time.Millisecond)
+		for scanner.Scan() {
+			fmt.Println(scanner.Text())
+		}
 	}
 }
 
@@ -419,9 +469,6 @@ func cmdReport(args []string) {
 	for _, entry := range r.Entries {
 		fmt.Printf("\n[%s] %s\n", entry.TaskID, entry.Prompt)
 		fmt.Printf("  Status: %s\n", entry.Status)
-		if entry.Report != "" {
-			fmt.Printf("  Report: %s\n", entry.Report)
-		}
 		fmt.Printf("  Finished: %s\n", entry.FinishedAt.Format("15:04:05"))
 	}
 }
@@ -441,6 +488,12 @@ func cmdInit() {
 	// Create empty state
 	store := &state.Store{Tasks: []state.Task{}}
 	if err := store.Save(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Write orc-add helper script
+	if err := claude.WriteOrcAddScript(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -475,6 +528,50 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+func loadTasks() []state.Task {
+	if ipc.IsRunning() {
+		resp, err := ipc.SendCommand(ipc.Request{Command: ipc.CmdListTasks})
+		if err == nil && resp.OK {
+			var tasks []state.Task
+			json.Unmarshal(resp.Payload, &tasks)
+			return tasks
+		}
+	}
+	store, err := state.Load()
+	if err != nil {
+		return nil
+	}
+	return store.AllTasks()
+}
+
+func tasksToItems(tasks []state.Task) []pick.Item {
+	items := make([]pick.Item, len(tasks))
+	for i, t := range tasks {
+		sched := ""
+		if t.Schedule != "" {
+			sched = " [" + t.Schedule + "]"
+		}
+		items[i] = pick.Item{
+			ID:    t.ID,
+			Label: fmt.Sprintf("%-10s %-12s %s%s", t.ID, t.Status, truncate(t.Prompt, 50), sched),
+		}
+	}
+	return items
+}
+
+func pickTask(title string) string {
+	tasks := loadTasks()
+	if len(tasks) == 0 {
+		fmt.Println("No tasks.")
+		return ""
+	}
+	item, ok := pick.Run(title, tasksToItems(tasks))
+	if !ok {
+		return ""
+	}
+	return item.ID
 }
 
 func generateID() string {

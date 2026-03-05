@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/leighmcculloch/orc/config"
@@ -22,8 +23,6 @@ type ProcessStatus struct {
 
 type Result struct {
 	ExitCode int
-	Report   string
-	Session  string
 	Error    error
 }
 
@@ -44,6 +43,12 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 		Status:    "starting",
 		UpdatedAt: time.Now(),
 	})
+
+	// Ensure orc-add helper script exists
+	if err := WriteOrcAddScript(); err != nil {
+		logFn("failed to write orc-add script: %v", err)
+		return Result{ExitCode: 1, Error: fmt.Errorf("writing orc-add script: %w", err)}
+	}
 
 	// Run pre-hooks
 	for _, hook := range env.PreHooks {
@@ -74,29 +79,31 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 		UpdatedAt: time.Now(),
 	})
 
-	// Run claude code
-	claudePath := cfg.Defaults.ClaudeCodePath
-	if claudePath == "" {
-		claudePath = "claude"
-	}
-
+	// Run agent command
 	runDir := env.WorkDir
 	if runDir == "" || runDir == "." {
 		runDir, _ = os.Getwd()
 	}
 
-	mcpConfig := os.ExpandEnv("$HOME/.claude/mcp.json")
-	args := []string{"--print", "--output-format", "json", "--dangerously-skip-permissions", "--mcp-config", mcpConfig, prompt}
-	cmd := exec.CommandContext(ctx, claudePath, args...)
-	cmd.Dir = runDir
+	agentCmd := cfg.Defaults.AgentCommand
+	if agentCmd == "" {
+		agentCmd = config.DefaultAgentCommand
+	}
 
-	// Capture output
+	// Append orc instructions to the prompt
+	fullPrompt := prompt + "\n\n" + orcInstructions()
+	shellCmd := strings.Replace(agentCmd, "$prompt", fullPrompt, 1)
+
+	// Capture output to log file
 	logPath := filepath.Join(workDir, "output.log")
 	logFile, err := os.Create(logPath)
 	if err != nil {
 		return Result{ExitCode: 1, Error: fmt.Errorf("creating log file: %w", err)}
 	}
 	defer logFile.Close()
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", shellCmd)
+	cmd.Dir = runDir
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -105,21 +112,18 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 	cmd.Stderr = cmd.Stdout
 
 	if err := cmd.Start(); err != nil {
-		logFn("failed to start claude: %v", err)
-		return Result{ExitCode: 1, Error: fmt.Errorf("starting claude: %w", err)}
+		logFn("failed to start agent: %v", err)
+		return Result{ExitCode: 1, Error: fmt.Errorf("starting agent: %w", err)}
 	}
 
-	logFn("claude process started (pid: %d)", cmd.Process.Pid)
+	logFn("agent process started (pid: %d)", cmd.Process.Pid)
 
-	// Stream output to log file and log function
-	var outputBuf []byte
+	// Stream output to log file
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		fmt.Fprintln(logFile, line)
-		outputBuf = append(outputBuf, line...)
-		outputBuf = append(outputBuf, '\n')
 		writeStatus(workDir, ProcessStatus{
 			TaskID:    taskID,
 			Status:    "running",
@@ -138,17 +142,14 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 		}
 	}
 
-	// Parse session ID from JSON output
-	sessionID := parseSessionID(outputBuf)
-
-	// Request report via follow-up --resume call if we have a session
-	reportText := ""
-	if exitCode == 0 && sessionID != "" {
-		logFn("requesting report via --resume %s", sessionID)
-		reportText = requestReport(ctx, claudePath, runDir, sessionID, logFn)
-		// Write report to file for reference
-		reportPath := filepath.Join(workDir, "report.md")
-		os.WriteFile(reportPath, []byte(reportText), 0644)
+	// Context cancelled
+	if ctx.Err() != nil {
+		writeStatus(workDir, ProcessStatus{
+			TaskID:    taskID,
+			Status:    "cancelled",
+			UpdatedAt: time.Now(),
+		})
+		return Result{ExitCode: 1, Error: ctx.Err()}
 	}
 
 	status := "completed"
@@ -163,37 +164,56 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 
 	return Result{
 		ExitCode: exitCode,
-		Report:   reportText,
-		Session:  sessionID,
 		Error:    err,
 	}
 }
 
-// parseSessionID extracts the session_id from Claude's JSON output.
-// Claude --output-format json produces a JSON object with a "session_id" field.
-func parseSessionID(output []byte) string {
-	var parsed struct {
-		SessionID string `json:"session_id"`
-	}
-	if err := json.Unmarshal(output, &parsed); err != nil {
-		return ""
-	}
-	return parsed.SessionID
+// orcInstructions returns instructions appended to every agent prompt explaining
+// how to create subtasks via the orc-add helper script.
+func orcInstructions() string {
+	return `--- ORC INSTRUCTIONS ---
+You are running as a task inside orc, a task orchestrator.
+You can create new tasks for other agents to work on by running:
+
+  .orc/bin/orc-add "your task prompt here"
+
+This will submit the task to orc's queue and it will be picked up by another agent.
+Use this when a subtask is independent and can be done in parallel.
+Do not create subtasks for work you can do yourself in the current session.`
 }
 
-// requestReport runs a follow-up claude invocation with --resume to ask for a report.
-func requestReport(ctx context.Context, claudePath string, runDir string, sessionID string, logFn func(string, ...any)) string {
-	mcpConfig := os.ExpandEnv("$HOME/.claude/mcp.json")
-	args := []string{"--print", "--resume", sessionID, "--dangerously-skip-permissions", "--mcp-config", mcpConfig, "Write a brief summary report (2-4 sentences) of what you just accomplished."}
-	cmd := exec.CommandContext(ctx, claudePath, args...)
-	cmd.Dir = runDir
-
-	out, err := cmd.Output()
-	if err != nil {
-		logFn("report follow-up failed: %v", err)
-		return ""
+// writeOrcAddScript writes the orc-add helper script to .orc/bin/orc-add.
+// The script writes a JSON command file to .orc/inbox/ to add a task via IPC.
+func WriteOrcAddScript() error {
+	binDir := filepath.Join(config.OrcDir(), "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		return err
 	}
-	return string(out)
+	script := `#!/bin/sh
+set -e
+prompt="$*"
+if [ -z "$prompt" ]; then
+  echo "usage: orc-add <prompt>" >&2
+  exit 1
+fi
+id=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')
+inbox=".orc/inbox"
+mkdir -p "$inbox"
+# Escape JSON special characters in prompt
+escaped=$(printf '%s' "$prompt" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g' | awk '{if(NR>1) printf "\\n"; printf "%s",$0}')
+tmp="$inbox/$id.json.tmp"
+cat > "$tmp" <<JSONEOF
+{
+  "id": "$id",
+  "command": "add_task",
+  "payload": {"prompt": "$escaped"}
+}
+JSONEOF
+mv "$tmp" "$inbox/$id.json"
+echo "task submitted: $id"
+`
+	scriptPath := filepath.Join(binDir, "orc-add")
+	return os.WriteFile(scriptPath, []byte(script), 0755)
 }
 
 func writeStatus(workDir string, status ProcessStatus) {

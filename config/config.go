@@ -19,10 +19,12 @@ type Environment struct {
 }
 
 type Defaults struct {
-	Environment    string `json:"environment"`
-	MaxConcurrent  int    `json:"max_concurrent"`
-	ClaudeCodePath string `json:"claude_code_path"`
+	Environment   string `json:"environment"`
+	MaxConcurrent int    `json:"max_concurrent"`
+	AgentCommand  string `json:"agent_command"`
 }
+
+const DefaultAgentCommand = `silo claude -- -p "$prompt"`
 
 func DefaultConfig() Config {
 	return Config{
@@ -34,9 +36,9 @@ func DefaultConfig() Config {
 			},
 		},
 		Defaults: Defaults{
-			Environment:    "default",
-			MaxConcurrent:  3,
-			ClaudeCodePath: "claude",
+			Environment:   "default",
+			MaxConcurrent: 3,
+			AgentCommand:  DefaultAgentCommand,
 		},
 	}
 }
@@ -53,6 +55,7 @@ func EnsureOrcDir() error {
 		filepath.Join(OrcDir(), "reports"),
 		filepath.Join(OrcDir(), "inbox"),
 		filepath.Join(OrcDir(), "outbox"),
+		filepath.Join(OrcDir(), "bin"),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
@@ -82,8 +85,8 @@ func Load() (Config, error) {
 	if cfg.Defaults.MaxConcurrent == 0 {
 		cfg.Defaults.MaxConcurrent = 3
 	}
-	if cfg.Defaults.ClaudeCodePath == "" {
-		cfg.Defaults.ClaudeCodePath = "claude"
+	if cfg.Defaults.AgentCommand == "" {
+		cfg.Defaults.AgentCommand = DefaultAgentCommand
 	}
 	if cfg.Environments == nil {
 		cfg.Environments = make(map[string]Environment)

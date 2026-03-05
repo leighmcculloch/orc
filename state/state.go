@@ -30,9 +30,7 @@ type Task struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	FinishedAt  *time.Time `json:"finished_at,omitempty"`
-	Report      string     `json:"report,omitempty"`
 	Error       string     `json:"error,omitempty"`
-	Session     string     `json:"session,omitempty"`
 	WorkDir     string     `json:"work_dir,omitempty"`
 	PID         int        `json:"pid,omitempty"`
 }

@@ -51,9 +51,11 @@ All state and config lives in `.orc/` in the current working directory:
 
 ```
 .orc/
-├── config.json          # environments, defaults (max_concurrent, claude_code_path)
+├── config.json          # environments, defaults (max_concurrent, agent_command)
 ├── state.json           # task list with statuses (atomic write via tmp+rename)
 ├── orc.pid              # pid file, exists only while orchestrator is running
+├── bin/
+│   └── orc-add              # helper script for agents to create subtasks
 ├── inbox/               # IPC: CLI writes command .json files here
 ├── outbox/              # IPC: orchestrator writes response .json files here
 ├── logs/
@@ -74,8 +76,9 @@ All state and config lives in `.orc/` in the current working directory:
 - **pid file for liveness.** `.orc/orc.pid` is created on `orc run` and removed on shutdown. `ipc.IsRunning()` checks for this file.
 - **All JSON.** Config, state, IPC messages, status files, reports — everything is JSON.
 - **State file is mutex-protected.** `state.Store` uses `sync.Mutex` for concurrent task updates from goroutines. Writes are atomic (tmp+rename).
-- **Claude Code is invoked with `--print --output-format text`.** The prompt is appended with instructions to write a report to `workdirs/<id>/report.md`.
-- **Pre-hooks run before claude.** Each environment config has `pre_hooks` (shell commands) that execute in the environment's `work_dir` before claude starts.
+- **Agent command is configurable.** Defaults to `silo claude -- -p "$prompt"`. The `$prompt` placeholder is replaced with the task prompt.
+- **Tasks can create subtasks.** Orc instructions are appended to every prompt telling agents how to use `.orc/bin/orc-add "prompt"` to submit new tasks. The helper script writes IPC JSON to the inbox.
+- **Pre-hooks run before the agent.** Each environment config has `pre_hooks` (shell commands) that execute in the environment's `work_dir` before the agent starts.
 - **Scheduled tasks stay in the task list.** After completing, the orchestrator resets them to pending when the next scheduled time arrives.
 - **TUI uses bubbletea with alt screen.** Refreshes every 1s via tick, receives events from orchestrator via channel.
 
@@ -98,7 +101,17 @@ All state and config lives in `.orc/` in the current working directory:
   "defaults": {
     "environment": "default",
     "max_concurrent": 3,
-    "claude_code_path": "claude"
+    "agent_command": "silo claude -- -p \"$prompt\""
+  }
+}
+```
+
+The `agent_command` is run via `sh -c` with `$prompt` replaced by the task prompt. To use a different agent, change the command. For example, to use GitHub Copilot:
+
+```json
+{
+  "defaults": {
+    "agent_command": "silo copilot -- -p \"$prompt\""
   }
 }
 ```
@@ -108,8 +121,8 @@ All state and config lives in `.orc/` in the current working directory:
 1. Task created (status: `pending`) — via `orc add` or IPC
 2. Orchestrator picks it up when a slot is available (status: `running`)
 3. Pre-hooks execute in environment's work_dir
-4. Claude Code runs with `--print`, stdout streamed to log
-5. On completion, report.md read, task marked `completed` or `failed`
+4. Agent command runs, stdout streamed to log
+5. On completion, task marked `completed` or `failed`
 6. Entry recorded in daily report (`reports/YYYY-MM-DD.json`)
 7. For scheduled tasks: reset to `pending` when next run time arrives
 

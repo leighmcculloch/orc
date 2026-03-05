@@ -14,7 +14,6 @@ import (
 type Entry struct {
 	TaskID     string    `json:"task_id"`
 	Prompt     string    `json:"prompt"`
-	Report     string    `json:"report"`
 	Status     string    `json:"status"`
 	FinishedAt time.Time `json:"finished_at"`
 }
@@ -41,7 +40,6 @@ func RecordCompletion(task state.Task) error {
 	entry := Entry{
 		TaskID: task.ID,
 		Prompt: task.Prompt,
-		Report: task.Report,
 		Status: string(task.Status),
 	}
 	if task.FinishedAt != nil {

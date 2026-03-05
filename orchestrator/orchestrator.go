@@ -155,7 +155,6 @@ func (o *Orchestrator) tick() {
 						t.Status = state.TaskPending
 						t.StartedAt = nil
 						t.FinishedAt = nil
-						t.Report = ""
 						t.Error = ""
 					})
 				}
@@ -240,8 +239,6 @@ func (o *Orchestrator) startTask(task state.Task) {
 				t.Status = state.TaskFailed
 				t.FinishedAt = &now
 				t.Error = errMsg
-				t.Report = result.Report
-				t.Session = result.Session
 			})
 			o.logger.TaskLog(task.ID, "task failed: %s", errMsg)
 			o.emit(Event{Type: EventTaskFailed, TaskID: task.ID, Message: errMsg})
@@ -249,11 +246,9 @@ func (o *Orchestrator) startTask(task state.Task) {
 			o.store.UpdateTask(task.ID, func(t *state.Task) {
 				t.Status = state.TaskCompleted
 				t.FinishedAt = &now
-				t.Report = result.Report
-				t.Session = result.Session
 			})
 			o.logger.TaskLog(task.ID, "task completed")
-			o.emit(Event{Type: EventTaskCompleted, TaskID: task.ID, Message: result.Report})
+			o.emit(Event{Type: EventTaskCompleted, TaskID: task.ID})
 		}
 
 		// Record in daily report

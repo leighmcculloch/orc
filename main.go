@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -585,10 +586,6 @@ func pickTask(title string) string {
 
 func generateID() string {
 	b := make([]byte, 4)
-	t := time.Now().UnixNano()
-	b[0] = byte(t >> 24)
-	b[1] = byte(t >> 16)
-	b[2] = byte(t >> 8)
-	b[3] = byte(t)
+	rand.Read(b)
 	return fmt.Sprintf("%x", b)
 }

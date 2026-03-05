@@ -53,16 +53,16 @@ Orc solves this by giving you:
 
 ## How It Works
 
-Orc runs as a **foreground process** with a TUI. It is not a daemon. While it's running, other `orc` processes communicate with it by writing JSON files to an inbox directory. The running orchestrator polls the inbox, processes commands, and writes responses to an outbox directory.
+Orc runs as a **foreground process** with a TUI. It is not a daemon. All CLI commands (`orc add`, `orc list`, etc.) read and write the shared job files directly — no IPC protocol needed.
 
 ```
 ┌──────────────────────┐       ┌──────────────────┐
 │   orc run (TUI)      │       │  orc add "task"   │
-│                      │ .orc/ │                    │
-│  orchestrator loop   │◄──────│  writes to inbox/  │
-│  polls inbox/        │       │  polls outbox/     │
-│  dispatches tasks    │──────►│  reads response    │
-│  manages agents      │       └──────────────────  ┘
+│                      │       │                    │
+│  orchestrator loop   │  .orc/jobs/*.json          │
+│  reads job files     │◄─────►│  writes job files  │
+│  dispatches tasks    │       └────────────────────┘
+│  manages agents      │
 └──────────────────────┘
          │
          ├── agent_command "task 1"
@@ -70,7 +70,7 @@ Orc runs as a **foreground process** with a TUI. It is not a daemon. While it's 
          └── agent_command "task 3"
 ```
 
-When orc is not running, commands like `orc add` and `orc list` fall back to reading and writing the state file directly. Tasks queued while orc is stopped will be picked up the next time `orc run` starts.
+Tasks queued while orc is stopped will be picked up the next time `orc run` starts.
 
 ## Commands
 
@@ -244,8 +244,6 @@ Environments let you define named configurations for different projects or conte
 │   ├── completed.json          Completed tasks
 │   └── failed.json             Failed + cancelled tasks
 ├── orc.pid                     PID file (exists while orc is running)
-├── inbox/                      IPC: incoming command files
-├── outbox/                     IPC: response files
 ├── logs/
 │   ├── orc-2025-03-15.log     Daily orchestrator log
 │   └── task-abc123de.log      Per-task log
@@ -323,7 +321,7 @@ When a task completes, it's recorded in `.orc/reports/YYYY-MM-DD.json`:
               recorded in daily report
 ```
 
-1. **Created** — task added via `orc add` or file-based IPC (status: `pending`)
+1. **Created** — task added via `orc add` or `orc-add` (status: `pending`)
 2. **Dispatched** — orchestrator picks it up when a concurrency slot opens (status: `running`)
 3. **Agent runs** — `agent_command` executed via `sh -c`, output streamed to log
 4. **Completed or Failed** — exit code checked
@@ -374,27 +372,6 @@ When you run `orc run`, you get a live terminal dashboard showing:
 - **Activity Log** — real-time event stream (task added/started/completed/failed/removed)
 
 Press `q` or `Ctrl+C` to shut down the orchestrator.
-
-## Inter-Process Communication
-
-Orc uses **file-based IPC** — no sockets, no network. This is how a second `orc` process (e.g., `orc add`) talks to the running orchestrator:
-
-1. CLI writes a command JSON file to `.orc/inbox/<request-id>.json`
-2. Orchestrator polls inbox every second, picks up the file, deletes it
-3. Orchestrator processes the command and writes a response to `.orc/outbox/<request-id>.json`
-4. CLI polls outbox (100ms interval, 30s timeout), reads the response, deletes it
-
-All writes are atomic (write to `.tmp`, then rename) to prevent partial reads.
-
-### Supported IPC Commands
-
-| Command | Description |
-|---------|-------------|
-| `add_task` | Add a new task to the queue |
-| `list_tasks` | Get all tasks |
-| `remove_task` | Remove a task by ID |
-| `get_status` | Get running/pending/completed/failed counts |
-| `stop` | Shut down the orchestrator |
 
 ## Examples
 
@@ -480,7 +457,7 @@ orc run
 
 In another terminal:
 ```bash
-# These go through file-based IPC to the running orchestrator
+# These write directly to the shared job files
 orc add "Migrate the user table to add email verification column"
 orc add "Write API documentation for the payments endpoint"
 orc list

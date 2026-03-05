@@ -71,8 +71,6 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 	fullPrompt := prompt + "\n\n" + orcInstructions()
 
 	// Write prompt to a file so it can be safely passed to the shell command
-	// without shell escaping issues. The agent command template uses $prompt
-	// which we replace with a shell-safe reference to the file.
 	promptPath := filepath.Join(workDir, "prompt.txt")
 	if err := os.WriteFile(promptPath, []byte(fullPrompt), 0644); err != nil {
 		return Result{ExitCode: 1, Error: fmt.Errorf("writing prompt file: %w", err)}
@@ -169,16 +167,15 @@ Use this when a subtask is independent and can be done in parallel.
 Do not create subtasks for work you can do yourself in the current session.`
 }
 
-// writeOrcAddScript writes the orc-add helper script to .orc/bin/orc-add.
-// The script writes a JSON command file to .orc/inbox/ to add a task via IPC.
+// WriteOrcAddScript writes the orc-add helper script to .orc/bin/orc-add.
+// The script writes a prompt file to .orc/jobs/inbox/ for the orchestrator to pick up.
 func WriteOrcAddScript() error {
 	binDir := filepath.Join(config.OrcDir(), "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		return err
 	}
 
-	// Resolve absolute path to inbox so the script works from any working directory
-	absInbox, err := filepath.Abs(filepath.Join(config.OrcDir(), "inbox"))
+	absInbox, err := filepath.Abs(filepath.Join(config.OrcDir(), "jobs", "inbox"))
 	if err != nil {
 		return fmt.Errorf("resolving inbox path: %w", err)
 	}
@@ -193,17 +190,9 @@ fi
 id=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')
 inbox=%s
 mkdir -p "$inbox"
-# Escape JSON special characters in prompt
-escaped=$(printf '%%s' "$prompt" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g' | awk '{if(NR>1) printf "\\n"; printf "%%s",$0}')
-tmp="$inbox/$id.json.tmp"
-cat > "$tmp" <<JSONEOF
-{
-  "id": "$id",
-  "command": "add_task",
-  "payload": {"prompt": "$escaped"}
-}
-JSONEOF
-mv "$tmp" "$inbox/$id.json"
+tmp="$inbox/$id.txt.tmp"
+printf '%%s' "$prompt" > "$tmp"
+mv "$tmp" "$inbox/$id.txt"
 echo "task submitted: $id"
 `, shellQuote(absInbox))
 	scriptPath := filepath.Join(binDir, "orc-add")

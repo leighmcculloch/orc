@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 type Config struct {
@@ -48,9 +49,8 @@ func EnsureOrcDir() error {
 		filepath.Join(OrcDir(), "logs"),
 		filepath.Join(OrcDir(), "workdirs"),
 		filepath.Join(OrcDir(), "jobs"),
+		filepath.Join(OrcDir(), "jobs", "inbox"),
 		filepath.Join(OrcDir(), "reports"),
-		filepath.Join(OrcDir(), "inbox"),
-		filepath.Join(OrcDir(), "outbox"),
 		filepath.Join(OrcDir(), "bin"),
 	}
 	for _, d := range dirs {
@@ -103,4 +103,49 @@ func Truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// PidPath returns the path to the pid file.
+func PidPath() string {
+	return filepath.Join(OrcDir(), "orc.pid")
+}
+
+// IsRunning checks if orc is running by reading the pid file and verifying
+// the process is alive. Removes stale pid files.
+func IsRunning() bool {
+	_, ok := RunningPid()
+	return ok
+}
+
+// RunningPid returns the pid of the running orc process, or false if not running.
+func RunningPid() (int, bool) {
+	data, err := os.ReadFile(PidPath())
+	if err != nil {
+		return 0, false
+	}
+	var pid int
+	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil {
+		os.Remove(PidPath())
+		return 0, false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		os.Remove(PidPath())
+		return 0, false
+	}
+	if err := proc.Signal(syscall.Signal(0)); err != nil {
+		os.Remove(PidPath())
+		return 0, false
+	}
+	return pid, true
+}
+
+// WritePid writes the current process pid to the pid file.
+func WritePid() error {
+	return os.WriteFile(PidPath(), []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
+}
+
+// RemovePid removes the pid file.
+func RemovePid() {
+	os.Remove(PidPath())
 }

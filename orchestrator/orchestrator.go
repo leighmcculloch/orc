@@ -2,14 +2,13 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/leighmcculloch/orc/agent"
 	"github.com/leighmcculloch/orc/config"
-	"github.com/leighmcculloch/orc/ipc"
 	"github.com/leighmcculloch/orc/logging"
 	"github.com/leighmcculloch/orc/report"
 	"github.com/leighmcculloch/orc/state"
@@ -60,11 +59,6 @@ type Event struct {
 func New(cfg config.Config, store *state.Store, logger *logging.Logger) (*Orchestrator, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	if err := ipc.EnsureIPCDirs(); err != nil {
-		cancel()
-		return nil, err
-	}
-
 	o := &Orchestrator{
 		cfg:           cfg,
 		store:         store,
@@ -95,11 +89,10 @@ func (o *Orchestrator) emit(evt Event) {
 func (o *Orchestrator) Run() error {
 	o.logger.Log("orc started (max_concurrent: %d)", o.maxConcurrent)
 
-	// Write pid file so other processes know we're running
-	if err := ipc.WritePid(); err != nil {
-		return fmt.Errorf("writing pid file: %w", err)
+	if err := config.WritePid(); err != nil {
+		return err
 	}
-	defer ipc.RemovePid()
+	defer config.RemovePid()
 
 	// Set up schedules for existing tasks
 	for _, task := range o.store.AllTasks() {
@@ -127,28 +120,15 @@ func (o *Orchestrator) Run() error {
 			o.logger.Log("orc shutdown complete")
 			return nil
 		case <-ticker.C:
-			o.pollInbox()
 			o.tick()
 		}
 	}
 }
 
-// pollInbox checks the inbox directory for new command files.
-func (o *Orchestrator) pollInbox() {
-	requests, err := ipc.PollInbox()
-	if err != nil {
-		o.logger.Log("error polling inbox: %v", err)
-		return
-	}
-	for _, req := range requests {
-		resp := o.handleIPC(req)
-		if err := ipc.WriteResponse(req.ID, resp); err != nil {
-			o.logger.Log("error writing response for %s: %v", req.ID, err)
-		}
-	}
-}
-
 func (o *Orchestrator) tick() {
+	// Check for new tasks dropped into jobs/inbox/ by orc-add
+	o.pollJobInbox()
+
 	// Check for scheduled tasks
 	now := time.Now()
 	for _, sched := range o.schedules {
@@ -167,6 +147,11 @@ func (o *Orchestrator) tick() {
 			}
 			sched.nextRun = nextScheduleTime(sched.cron)
 		}
+	}
+
+	// Reload store to pick up tasks added by other processes
+	if fresh, err := state.Load(); err == nil {
+		o.store.Merge(fresh)
 	}
 
 	// Start pending tasks if capacity available
@@ -266,6 +251,46 @@ func (o *Orchestrator) startTask(task state.Task) {
 	}()
 }
 
+// pollJobInbox checks for prompt files dropped by orc-add into jobs/inbox/.
+func (o *Orchestrator) pollJobInbox() {
+	inboxDir := filepath.Join(config.OrcDir(), "jobs", "inbox")
+	entries, err := os.ReadDir(inboxDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".txt" {
+			continue
+		}
+		path := filepath.Join(inboxDir, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		os.Remove(path)
+
+		prompt := string(data)
+		if prompt == "" {
+			continue
+		}
+
+		env := o.cfg.Defaults.Environment
+		task := state.Task{
+			Prompt:      prompt,
+			Environment: env,
+			Status:      state.TaskPending,
+			CreatedAt:   time.Now(),
+		}
+		task, err = o.store.AddTask(task)
+		if err != nil {
+			o.logger.Log("error adding task from inbox: %v", err)
+			continue
+		}
+		o.logger.Log("task added from inbox: %s (%s)", task.ID, config.Truncate(task.Prompt, 60))
+		o.emit(Event{Type: EventTaskAdded, TaskID: task.ID, Message: task.Prompt})
+	}
+}
+
 func (o *Orchestrator) addSchedule(task state.Task) {
 	o.schedules[task.ID] = &scheduleEntry{
 		taskID:  task.ID,
@@ -284,107 +309,4 @@ func (o *Orchestrator) Stop() {
 
 func (o *Orchestrator) Store() *state.Store {
 	return o.store
-}
-
-func (o *Orchestrator) handleIPC(req ipc.Request) ipc.Response {
-	switch req.Command {
-	case ipc.CmdAddTask:
-		return o.handleAddTask(req.Payload)
-	case ipc.CmdListTasks:
-		return o.handleListTasks()
-	case ipc.CmdRemoveTask:
-		return o.handleRemoveTask(req.Payload)
-	case ipc.CmdGetStatus:
-		return o.handleGetStatus()
-	case ipc.CmdStop:
-		o.Stop()
-		return ipc.Response{OK: true}
-	default:
-		return ipc.Response{OK: false, Error: fmt.Sprintf("unknown command: %s", req.Command)}
-	}
-}
-
-func (o *Orchestrator) handleAddTask(payload json.RawMessage) ipc.Response {
-	var p ipc.AddTaskPayload
-	if err := json.Unmarshal(payload, &p); err != nil {
-		return ipc.Response{OK: false, Error: "invalid payload"}
-	}
-
-	env := p.Environment
-	if env == "" {
-		env = o.cfg.Defaults.Environment
-	}
-
-	task := state.Task{
-		Prompt:      p.Prompt,
-		Environment: env,
-		Schedule:    p.Schedule,
-		Status:      state.TaskPending,
-		CreatedAt:   time.Now(),
-	}
-
-	task, err := o.store.AddTask(task)
-	if err != nil {
-		return ipc.Response{OK: false, Error: err.Error()}
-	}
-
-	if task.Schedule != "" {
-		o.addSchedule(task)
-	}
-
-	o.logger.Log("task added: %s (%s)", task.ID, task.Prompt)
-	o.emit(Event{Type: EventTaskAdded, TaskID: task.ID, Message: task.Prompt})
-
-	data, err := json.Marshal(task)
-	if err != nil {
-		return ipc.Response{OK: false, Error: fmt.Sprintf("marshaling task: %v", err)}
-	}
-	return ipc.Response{OK: true, Payload: data}
-}
-
-func (o *Orchestrator) handleListTasks() ipc.Response {
-	tasks := o.store.AllTasks()
-	data, err := json.Marshal(tasks)
-	if err != nil {
-		return ipc.Response{OK: false, Error: fmt.Sprintf("marshaling tasks: %v", err)}
-	}
-	return ipc.Response{OK: true, Payload: data}
-}
-
-func (o *Orchestrator) handleRemoveTask(payload json.RawMessage) ipc.Response {
-	var p ipc.RemoveTaskPayload
-	if err := json.Unmarshal(payload, &p); err != nil {
-		return ipc.Response{OK: false, Error: "invalid payload"}
-	}
-
-	if err := o.store.RemoveTask(p.TaskID); err != nil {
-		return ipc.Response{OK: false, Error: err.Error()}
-	}
-
-	delete(o.schedules, p.TaskID)
-
-	o.logger.Log("task removed: %s", p.TaskID)
-	o.emit(Event{Type: EventTaskRemoved, TaskID: p.TaskID})
-	return ipc.Response{OK: true}
-}
-
-func (o *Orchestrator) handleGetStatus() ipc.Response {
-	status := struct {
-		Running   int          `json:"running"`
-		Pending   int          `json:"pending"`
-		Completed int          `json:"completed"`
-		Failed    int          `json:"failed"`
-		Tasks     []state.Task `json:"tasks"`
-	}{
-		Running:   len(o.store.TasksByStatus(state.TaskRunning)),
-		Pending:   len(o.store.TasksByStatus(state.TaskPending)),
-		Completed: len(o.store.TasksByStatus(state.TaskCompleted)),
-		Failed:    len(o.store.TasksByStatus(state.TaskFailed)),
-		Tasks:     o.store.AllTasks(),
-	}
-	data, err := json.Marshal(status)
-	if err != nil {
-		return ipc.Response{OK: false, Error: fmt.Sprintf("marshaling status: %v", err)}
-	}
-	return ipc.Response{OK: true, Payload: data}
 }

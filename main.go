@@ -2,17 +2,16 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/leighmcculloch/orc/agent"
 	"github.com/leighmcculloch/orc/config"
-	"github.com/leighmcculloch/orc/ipc"
 	"github.com/leighmcculloch/orc/logging"
 	"github.com/leighmcculloch/orc/orchestrator"
 	"github.com/leighmcculloch/orc/pick"
@@ -59,7 +58,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println(`orc — Claude Code Orchestrator
+	fmt.Println(`orc — AI Agent Orchestrator
 
 Usage:
   orc run                      Start the orchestrator (foreground with TUI)
@@ -68,7 +67,7 @@ Usage:
   orc add -s <schedule> <prompt>  Add a scheduled task
   orc list                     List all tasks
   orc remove <task-id>         Remove a task
-  orc status                   Show orchestrator status
+  orc status                   Show task status
   orc log [--date YYYY-MM-DD] [--follow]  View logs
   orc report [today|yesterday|YYYY-MM-DD]  View completed task reports
   orc init                     Initialize .orc directory with default config
@@ -82,7 +81,7 @@ Schedule formats:
 }
 
 func cmdRun() {
-	if ipc.IsRunning() {
+	if config.IsRunning() {
 		fmt.Fprintln(os.Stderr, "orc is already running")
 		os.Exit(1)
 	}
@@ -159,41 +158,6 @@ func cmdAdd(args []string) {
 		os.Exit(1)
 	}
 
-	payload := ipc.AddTaskPayload{
-		Prompt:      prompt,
-		Environment: env,
-		Schedule:    schedule,
-	}
-
-	// If orc is running, send via inbox file
-	if ipc.IsRunning() {
-		data, err := json.Marshal(payload)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		resp, err := ipc.SendCommand(ipc.Request{
-			Command: ipc.CmdAddTask,
-			Payload: data,
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		if !resp.OK {
-			fmt.Fprintf(os.Stderr, "error: %s\n", resp.Error)
-			os.Exit(1)
-		}
-		var task state.Task
-		if err := json.Unmarshal(resp.Payload, &task); err != nil {
-			fmt.Fprintf(os.Stderr, "error parsing response: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Printf("Task added: %s\n", task.ID)
-		return
-	}
-
-	// If not running, add directly to state file
 	if err := config.EnsureOrcDir(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -211,7 +175,7 @@ func cmdAdd(args []string) {
 		os.Exit(1)
 	}
 
-	taskEnv := payload.Environment
+	taskEnv := env
 	if taskEnv == "" {
 		taskEnv = cfg.Defaults.Environment
 	}
@@ -230,29 +194,10 @@ func cmdAdd(args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Task added: %s (orc not running — task will start when orc runs)\n", task.ID)
+	fmt.Printf("Task added: %s\n", task.ID)
 }
 
 func cmdList() {
-	if ipc.IsRunning() {
-		resp, err := ipc.SendCommand(ipc.Request{Command: ipc.CmdListTasks})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		if !resp.OK {
-			fmt.Fprintf(os.Stderr, "error: %s\n", resp.Error)
-			os.Exit(1)
-		}
-		var tasks []state.Task
-		if err := json.Unmarshal(resp.Payload, &tasks); err != nil {
-			fmt.Fprintf(os.Stderr, "error parsing response: %v\n", err)
-			os.Exit(1)
-		}
-		printTasks(tasks)
-		return
-	}
-
 	store, err := state.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -288,29 +233,6 @@ func cmdRemove(args []string) {
 		return
 	}
 
-	if ipc.IsRunning() {
-		payload := ipc.RemoveTaskPayload{TaskID: taskID}
-		data, err := json.Marshal(payload)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		resp, err := ipc.SendCommand(ipc.Request{
-			Command: ipc.CmdRemoveTask,
-			Payload: data,
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		if !resp.OK {
-			fmt.Fprintf(os.Stderr, "error: %s\n", resp.Error)
-			os.Exit(1)
-		}
-		fmt.Printf("Task removed: %s\n", taskID)
-		return
-	}
-
 	store, err := state.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -324,45 +246,39 @@ func cmdRemove(args []string) {
 }
 
 func cmdStatus() {
-	if !ipc.IsRunning() {
-		fmt.Println("orc is not running")
-
-		// Still show state file info
-		store, err := state.Load()
-		if err != nil {
-			return
-		}
-		tasks := store.AllTasks()
-		if len(tasks) > 0 {
-			fmt.Printf("\nQueued tasks: %d\n", len(tasks))
-			printTasks(tasks)
-		}
-		return
-	}
-
-	resp, err := ipc.SendCommand(ipc.Request{Command: ipc.CmdGetStatus})
+	store, err := state.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
-	var status struct {
-		Running   int          `json:"running"`
-		Pending   int          `json:"pending"`
-		Completed int          `json:"completed"`
-		Failed    int          `json:"failed"`
-		Tasks     []state.Task `json:"tasks"`
-	}
-	if err := json.Unmarshal(resp.Payload, &status); err != nil {
-		fmt.Fprintf(os.Stderr, "error parsing response: %v\n", err)
-		os.Exit(1)
+	tasks := store.AllTasks()
+	running := 0
+	pending := 0
+	completed := 0
+	failed := 0
+	for _, t := range tasks {
+		switch t.Status {
+		case state.TaskRunning:
+			running++
+		case state.TaskPending:
+			pending++
+		case state.TaskCompleted:
+			completed++
+		case state.TaskFailed, state.TaskCancelled:
+			failed++
+		}
 	}
 
-	fmt.Println("orc is running")
-	fmt.Printf("  Running:   %d\n", status.Running)
-	fmt.Printf("  Pending:   %d\n", status.Pending)
-	fmt.Printf("  Completed: %d\n", status.Completed)
-	fmt.Printf("  Failed:    %d\n", status.Failed)
+	if config.IsRunning() {
+		fmt.Println("orc is running")
+	} else {
+		fmt.Println("orc is not running")
+	}
+	fmt.Printf("  Running:   %d\n", running)
+	fmt.Printf("  Pending:   %d\n", pending)
+	fmt.Printf("  Completed: %d\n", completed)
+	fmt.Printf("  Failed:    %d\n", failed)
 }
 
 func cmdLog(args []string) {
@@ -530,39 +446,31 @@ func cmdInit() {
 
 	fmt.Println("Initialized .orc directory")
 	fmt.Println("  Config: .orc/config.json")
-	fmt.Println("  State:  .orc/state.json")
+	fmt.Println("  Jobs:   .orc/jobs/")
 	fmt.Println()
 	fmt.Println("Edit .orc/config.json to configure environments and settings.")
 	fmt.Println("Run 'orc run' to start the orchestrator.")
 }
 
 func cmdStop() {
-	if !ipc.IsRunning() {
+	pid, ok := config.RunningPid()
+	if !ok {
 		fmt.Println("orc is not running")
 		return
 	}
-	resp, err := ipc.SendCommand(ipc.Request{Command: ipc.CmdStop})
+	proc, err := os.FindProcess(pid)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error finding process: %v\n", err)
 		os.Exit(1)
 	}
-	if resp.OK {
-		fmt.Println("orc stop signal sent")
-	} else {
-		fmt.Fprintf(os.Stderr, "error: %s\n", resp.Error)
+	if err := proc.Signal(syscall.SIGINT); err != nil {
+		fmt.Fprintf(os.Stderr, "error sending signal: %v\n", err)
+		os.Exit(1)
 	}
+	fmt.Println("orc stop signal sent")
 }
 
 func loadTasks() []state.Task {
-	if ipc.IsRunning() {
-		resp, err := ipc.SendCommand(ipc.Request{Command: ipc.CmdListTasks})
-		if err == nil && resp.OK {
-			var tasks []state.Task
-			if err := json.Unmarshal(resp.Payload, &tasks); err == nil {
-				return tasks
-			}
-		}
-	}
 	store, err := state.Load()
 	if err != nil {
 		return nil

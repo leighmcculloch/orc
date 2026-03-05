@@ -1,6 +1,6 @@
-# Orc — Claude Code Orchestrator
+# Orc — AI Agent Orchestrator
 
-A terminal CLI app (Go) that orchestrates a fleet of Claude Code processes. It runs as a long-running foreground app with a TUI, and other `orc` processes communicate with it via file-based IPC.
+A terminal CLI app (Go) that orchestrates a fleet of AI coding agent processes. It runs as a long-running foreground app with a TUI. CLI commands read/write shared job files directly.
 
 ## Build & Run
 
@@ -33,16 +33,15 @@ orc stop                                  Stop running orchestrator
 ```
 orc/
 ├── main.go                              CLI entry point, all commands
-├── internal/
-│   ├── config/config.go                 Config types, load/save, .orc dir management
-│   ├── state/state.go                   Task model, Store with mutex-protected JSON persistence
-│   ├── orchestrator/orchestrator.go     Core engine: main loop, inbox polling, task dispatch
-│   ├── orchestrator/schedule.go         Schedule parsing + ID generation
-│   ├── agent/agent.go                   Agent process lifecycle (exec, subtask support)
-│   ├── ipc/ipc.go                       File-based IPC (inbox/outbox JSON files, pid file)
-│   ├── logging/logging.go              Per-day + per-task log files, streaming
-│   ├── report/report.go                Daily report catalogue (completed task summaries)
-│   └── tui/tui.go                      Bubbletea TUI dashboard
+├── config/config.go                     Config types, load/save, .orc dir management, pid file
+├── state/state.go                       Task model, Store with mutex-protected JSON persistence
+├── orchestrator/orchestrator.go         Core engine: main loop, task dispatch, inbox polling
+├── orchestrator/schedule.go             Schedule parsing
+├── agent/agent.go                       Agent process lifecycle (exec, subtask support)
+├── logging/logging.go                   Per-day + per-task log files, streaming
+├── report/report.go                     Daily report catalogue (completed task summaries)
+├── tui/tui.go                           Bubbletea TUI dashboard
+└── pick/pick.go                         Interactive task picker
 ```
 
 ## .orc/ Directory Layout
@@ -57,32 +56,32 @@ All state and config lives in `.orc/` in the current working directory:
 │   ├── todo.json        # pending + running tasks
 │   ├── scheduled.json   # scheduled tasks
 │   ├── completed.json   # completed tasks
-│   └── failed.json      # failed + cancelled tasks
+│   ├── failed.json      # failed + cancelled tasks
+│   └── inbox/           # prompt files dropped by orc-add for subtask creation
 ├── orc.pid              # pid file, exists only while orchestrator is running
 ├── bin/
-│   └── orc-add              # helper script for agents to create subtasks
-├── inbox/               # IPC: CLI writes command .json files here
-├── outbox/              # IPC: orchestrator writes response .json files here
+│   └── orc-add          # helper script for agents to create subtasks
 ├── logs/
 │   ├── orc-YYYY-MM-DD.log    # daily orchestrator log
 │   └── task-<id>.log         # per-task log
 ├── workdirs/
 │   └── <task-id>/
-│       ├── status.json        # live process status (written by claude runner)
-│       ├── output.log         # full claude stdout/stderr capture
-│       └── report.md          # summary report written by claude agent
+│       ├── status.json        # live process status (written by agent runner)
+│       ├── output.log         # full agent stdout/stderr capture
+│       └── prompt.txt         # prompt sent to the agent
 └── reports/
     └── YYYY-MM-DD.json        # daily catalogue of completed task entries
 ```
 
 ## Key Design Decisions
 
-- **File-based IPC, not sockets.** CLI writes JSON command files to `.orc/inbox/`, orchestrator polls every 1s, processes them, writes responses to `.orc/outbox/`. CLI polls outbox for response (100ms interval, 30s timeout). Atomic writes via tmp+rename prevent partial reads.
-- **pid file for liveness.** `.orc/orc.pid` is created on `orc run` and removed on shutdown. `ipc.IsRunning()` checks for this file.
-- **All JSON.** Config, state, IPC messages, status files, reports — everything is JSON.
+- **Shared job files, no IPC.** CLI commands and the orchestrator read/write the same job files directly. No inbox/outbox protocol needed.
+- **pid file for liveness.** `.orc/orc.pid` is created on `orc run` and removed on shutdown. `config.IsRunning()` checks the pid file and validates the process is alive.
+- **`orc stop` sends SIGINT.** Reads the pid from the pid file and sends SIGINT to the orchestrator process.
+- **All JSON.** Config, job files, status files, reports — everything is JSON.
 - **Tasks stored in separate files by status.** `jobs/todo.json`, `jobs/scheduled.json`, `jobs/completed.json`, `jobs/failed.json`. `state.Store` uses `sync.Mutex` for concurrent updates. All writes are atomic (tmp+rename).
 - **Agent command is configurable.** Set `defaults.agent_command` in config. The `$prompt` placeholder is replaced with the task prompt. No default — must be configured.
-- **Tasks can create subtasks.** Orc instructions are appended to every prompt telling agents how to use `.orc/bin/orc-add "prompt"` to submit new tasks. The helper script writes IPC JSON to the inbox.
+- **Tasks can create subtasks.** Orc instructions are appended to every prompt telling agents how to use `.orc/bin/orc-add "prompt"`. The script drops a prompt file into `jobs/inbox/` which the orchestrator picks up.
 - **Scheduled tasks stay in the task list.** After completing, the orchestrator resets them to pending when the next scheduled time arrives.
 - **TUI uses bubbletea with alt screen.** Refreshes every 1s via tick, receives events from orchestrator via channel.
 
@@ -125,12 +124,12 @@ Using silo with GitHub Copilot:
 
 ## Task Lifecycle
 
-1. Task created (status: `pending`) — via `orc add` or IPC
+1. Task created (status: `pending`) — via `orc add` or `orc-add`
 2. Orchestrator picks it up when a slot is available (status: `running`)
 3. Agent command runs, stdout streamed to log
 4. On completion, task marked `completed` or `failed`
-6. Entry recorded in daily report (`reports/YYYY-MM-DD.json`)
-7. For scheduled tasks: reset to `pending` when next run time arrives
+5. Entry recorded in daily report (`reports/YYYY-MM-DD.json`)
+6. For scheduled tasks: reset to `pending` when next run time arrives
 
 Task statuses: `pending`, `running`, `completed`, `failed`, `cancelled`
 
@@ -139,14 +138,6 @@ Task statuses: `pending`, `running`, `completed`, `failed`, `cancelled`
 - `every 5m` / `every 1h` / `every 30s` — interval-based (Go duration)
 - `daily 09:00` — daily at specific time
 - `hourly` — every hour on the hour
-
-## IPC Protocol
-
-Commands (written as JSON to inbox): `add_task`, `list_tasks`, `remove_task`, `get_status`, `stop`
-
-Each request file has an `id` field. Response is written to `outbox/<id>.json` with `ok`, `error`, and `payload` fields.
-
-When orc is not running, `orc add` and `orc list` fall back to reading/writing `state.json` directly.
 
 ## Dependencies
 

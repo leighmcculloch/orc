@@ -241,6 +241,32 @@ func (s *Store) TasksByStatus(status TaskStatus) []Task {
 	return result
 }
 
+// Merge incorporates new tasks from a freshly loaded store that don't exist
+// in the current store. This allows the orchestrator to pick up tasks added
+// by other processes writing directly to the job files.
+func (s *Store) Merge(other *Store) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing := make(map[string]bool)
+	for _, t := range s.allTasksLocked() {
+		existing[t.ID] = true
+	}
+
+	other.mu.Lock()
+	defer other.mu.Unlock()
+	for _, t := range other.allTasksLocked() {
+		if !existing[t.ID] {
+			s.placeTask(t)
+		}
+	}
+
+	// Update nextID if the other store has a higher value
+	if other.nextID > s.nextID {
+		s.nextID = other.nextID
+	}
+}
+
 func (s *Store) AllTasks() []Task {
 	s.mu.Lock()
 	defer s.mu.Unlock()

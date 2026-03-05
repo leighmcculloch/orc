@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -31,23 +32,23 @@ func main() {
 
 	switch cmd {
 	case "", "run":
-		cmdRun()
+		cmdRun(args)
 	case "add":
 		cmdAdd(args)
 	case "list", "ls":
-		cmdList()
+		cmdList(args)
 	case "remove", "rm":
 		cmdRemove(args)
 	case "status":
-		cmdStatus()
+		cmdStatus(args)
 	case "log", "logs":
 		cmdLog(args)
 	case "report":
 		cmdReport(args)
 	case "init":
-		cmdInit()
+		cmdInit(args)
 	case "stop":
-		cmdStop()
+		cmdStop(args)
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -61,17 +62,16 @@ func printUsage() {
 	fmt.Println(`orc — AI Agent Orchestrator
 
 Usage:
-  orc run                      Start the orchestrator (foreground with TUI)
-  orc add <prompt>             Add an ad-hoc task
-  orc add -e <env> <prompt>    Add a task with a specific environment
-  orc add -s <schedule> <prompt>  Add a scheduled task
-  orc list                     List all tasks
-  orc remove <task-id>         Remove a task
-  orc status                   Show task status
-  orc log [--date YYYY-MM-DD] [--follow]  View logs
+  orc                                     Start the orchestrator (same as orc run)
+  orc run                                 Start the orchestrator (foreground with TUI)
+  orc add [-e env] [-s schedule] <prompt>  Add a task
+  orc list                                List all tasks
+  orc remove <task-id>                    Remove a task
+  orc status                              Show task status
+  orc log [-d YYYY-MM-DD] [-f] [-t id]    View logs
   orc report [today|yesterday|YYYY-MM-DD]  View completed task reports
-  orc init                     Initialize .orc directory with default config
-  orc stop                     Stop the running orchestrator
+  orc init                                Initialize .orc directory with default config
+  orc stop                                Stop the running orchestrator
 
 Schedule formats:
   "every 5m"       Run every 5 minutes
@@ -80,7 +80,14 @@ Schedule formats:
   "hourly"         Run every hour on the hour`)
 }
 
-func cmdRun() {
+func cmdRun(args []string) {
+	fs := flag.NewFlagSet("orc run", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: orc run")
+		fmt.Fprintln(os.Stderr, "  Start the orchestrator (foreground with TUI)")
+	}
+	fs.Parse(args)
+
 	if config.IsRunning() {
 		fmt.Fprintln(os.Stderr, "orc is already running")
 		os.Exit(1)
@@ -131,30 +138,18 @@ func cmdRun() {
 }
 
 func cmdAdd(args []string) {
-	env := ""
-	schedule := ""
-	var promptParts []string
-
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-e", "--env":
-			if i+1 < len(args) {
-				env = args[i+1]
-				i++
-			}
-		case "-s", "--schedule":
-			if i+1 < len(args) {
-				schedule = args[i+1]
-				i++
-			}
-		default:
-			promptParts = append(promptParts, args[i])
-		}
+	fs := flag.NewFlagSet("orc add", flag.ExitOnError)
+	env := fs.String("e", "", "environment name")
+	schedule := fs.String("s", "", "schedule expression (e.g. \"every 5m\", \"daily 09:00\")")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: orc add [-e env] [-s schedule] <prompt>")
+		fs.PrintDefaults()
 	}
+	fs.Parse(args)
 
-	prompt := strings.Join(promptParts, " ")
+	prompt := strings.Join(fs.Args(), " ")
 	if prompt == "" {
-		fmt.Fprintln(os.Stderr, "usage: orc add [-e env] [-s schedule] <prompt>")
+		fs.Usage()
 		os.Exit(1)
 	}
 
@@ -175,7 +170,7 @@ func cmdAdd(args []string) {
 		os.Exit(1)
 	}
 
-	taskEnv := env
+	taskEnv := *env
 	if taskEnv == "" {
 		taskEnv = cfg.Defaults.Environment
 	}
@@ -183,7 +178,7 @@ func cmdAdd(args []string) {
 	task := state.Task{
 		Prompt:      prompt,
 		Environment: taskEnv,
-		Schedule:    schedule,
+		Schedule:    *schedule,
 		Status:      state.TaskPending,
 		CreatedAt:   time.Now(),
 	}
@@ -197,7 +192,14 @@ func cmdAdd(args []string) {
 	fmt.Printf("Task added: %s\n", task.ID)
 }
 
-func cmdList() {
+func cmdList(args []string) {
+	fs := flag.NewFlagSet("orc list", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: orc list")
+		fmt.Fprintln(os.Stderr, "  List all tasks")
+	}
+	fs.Parse(args)
+
 	store, err := state.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -223,9 +225,16 @@ func printTasks(tasks []state.Task) {
 }
 
 func cmdRemove(args []string) {
+	fs := flag.NewFlagSet("orc remove", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: orc remove <task-id>")
+		fmt.Fprintln(os.Stderr, "  Remove a task by ID")
+	}
+	fs.Parse(args)
+
 	taskID := ""
-	if len(args) > 0 {
-		taskID = args[0]
+	if fs.NArg() > 0 {
+		taskID = fs.Arg(0)
 	} else {
 		taskID = pickTask("Select task to remove:")
 	}
@@ -245,7 +254,14 @@ func cmdRemove(args []string) {
 	fmt.Printf("Task removed: %s\n", taskID)
 }
 
-func cmdStatus() {
+func cmdStatus(args []string) {
+	fs := flag.NewFlagSet("orc status", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: orc status")
+		fmt.Fprintln(os.Stderr, "  Show running/pending/completed/failed counts")
+	}
+	fs.Parse(args)
+
 	store, err := state.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -282,54 +298,42 @@ func cmdStatus() {
 }
 
 func cmdLog(args []string) {
-	date := time.Now().Format("2006-01-02")
-	follow := false
-	taskID := ""
-	taskMode := false
-
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--date", "-d":
-			if i+1 < len(args) {
-				date = args[i+1]
-				i++
-			}
-		case "--follow", "-f":
-			follow = true
-		case "--task", "-t":
-			taskMode = true
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				taskID = args[i+1]
-				i++
-			}
-		}
+	fs := flag.NewFlagSet("orc log", flag.ExitOnError)
+	date := fs.String("d", time.Now().Format("2006-01-02"), "date to view logs for (YYYY-MM-DD)")
+	follow := fs.Bool("f", false, "follow/stream log output")
+	taskID := fs.String("t", "", "task ID to view logs for")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: orc log [-d YYYY-MM-DD] [-f] [-t task-id]")
+		fs.PrintDefaults()
 	}
+	fs.Parse(args)
 
-	if taskMode {
-		if taskID == "" {
-			taskID = pickTask("Select task to view logs:")
+	if *taskID != "" || *taskID == "" && isFlagSet(fs, "t") {
+		id := *taskID
+		if id == "" {
+			id = pickTask("Select task to view logs:")
 		}
-		if taskID == "" {
+		if id == "" {
 			return
 		}
-		logPath := filepath.Join(config.OrcDir(), "workdirs", taskID, "output.log")
+		logPath := filepath.Join(config.OrcDir(), "workdirs", id, "output.log")
 
-		if follow {
+		if *follow {
 			streamFile(logPath)
 			return
 		}
 
 		data, err := os.ReadFile(logPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "no output log for task %s\n", taskID)
+			fmt.Fprintf(os.Stderr, "no output log for task %s\n", id)
 			os.Exit(1)
 		}
 		fmt.Print(string(data))
 		return
 	}
 
-	if follow {
-		ch, cancel, err := logging.StreamLog(date, true)
+	if *follow {
+		ch, cancel, err := logging.StreamLog(*date, true)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
@@ -341,7 +345,7 @@ func cmdLog(args []string) {
 		return
 	}
 
-	lines, err := logging.ReadLog(date)
+	lines, err := logging.ReadLog(*date)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -349,6 +353,17 @@ func cmdLog(args []string) {
 	for _, line := range lines {
 		fmt.Println(line)
 	}
+}
+
+// isFlagSet returns true if the named flag was explicitly set on the command line.
+func isFlagSet(fs *flag.FlagSet, name string) bool {
+	found := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
 }
 
 func streamFile(path string) {
@@ -383,15 +398,22 @@ func streamFile(path string) {
 }
 
 func cmdReport(args []string) {
+	fs := flag.NewFlagSet("orc report", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: orc report [today|yesterday|YYYY-MM-DD]")
+		fmt.Fprintln(os.Stderr, "  View completed task reports for a given date (default: today)")
+	}
+	fs.Parse(args)
+
 	date := time.Now().Format("2006-01-02")
-	if len(args) > 0 {
-		switch args[0] {
+	if fs.NArg() > 0 {
+		switch fs.Arg(0) {
 		case "today":
 			date = time.Now().Format("2006-01-02")
 		case "yesterday":
 			date = time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 		default:
-			date = args[0]
+			date = fs.Arg(0)
 		}
 	}
 
@@ -415,7 +437,14 @@ func cmdReport(args []string) {
 	}
 }
 
-func cmdInit() {
+func cmdInit(args []string) {
+	fs := flag.NewFlagSet("orc init", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: orc init")
+		fmt.Fprintln(os.Stderr, "  Initialize .orc directory with default config")
+	}
+	fs.Parse(args)
+
 	if err := config.EnsureOrcDir(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -452,7 +481,14 @@ func cmdInit() {
 	fmt.Println("Run 'orc run' to start the orchestrator.")
 }
 
-func cmdStop() {
+func cmdStop(args []string) {
+	fs := flag.NewFlagSet("orc stop", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: orc stop")
+		fmt.Fprintln(os.Stderr, "  Stop the running orchestrator")
+	}
+	fs.Parse(args)
+
 	pid, ok := config.RunningPid()
 	if !ok {
 		fmt.Println("orc is not running")

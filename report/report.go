@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/leighmcculloch/orc/config"
 	"github.com/leighmcculloch/orc/state"
 )
+
+var mu sync.Mutex
 
 type Entry struct {
 	TaskID     string    `json:"task_id"`
@@ -24,6 +27,9 @@ type DailyReport struct {
 }
 
 func RecordCompletion(task state.Task) error {
+	mu.Lock()
+	defer mu.Unlock()
+
 	if err := config.EnsureOrcDir(); err != nil {
 		return err
 	}
@@ -51,7 +57,13 @@ func RecordCompletion(task state.Task) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(reportPath, data, 0644)
+
+	// Atomic write via tmp+rename
+	tmp := reportPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, reportPath)
 }
 
 func GetReport(date string) (DailyReport, error) {

@@ -231,7 +231,13 @@ func (m *model) loadOutput() {
 }
 
 func (m model) outputViewHeight() int {
-	h := m.height - 4 // title + help + margins
+	// Account for: task ID line, prompt lines, blank line, blank line before help, help line
+	promptLines := 1
+	store := m.orc.Store()
+	if t, ok := store.GetTask(m.viewTaskID); ok {
+		promptLines = strings.Count(t.Prompt, "\n") + 1
+	}
+	h := m.height - promptLines - 4 // task ID + prompt + blank + help + trailing
 	if h < 1 {
 		h = 20
 	}
@@ -382,15 +388,15 @@ func (m model) renderTaskLine(idx int, t state.Task, style lipgloss.Style, icon 
 func (m model) viewTaskOutputScreen() string {
 	var b strings.Builder
 
-	// Find task for title
-	prompt := m.viewTaskID
+	// Show task ID and full prompt
+	b.WriteString(detailTitleStyle.Render(fmt.Sprintf("Task %s", m.viewTaskID)))
+	b.WriteString("\n")
 	store := m.orc.Store()
 	if t, ok := store.GetTask(m.viewTaskID); ok {
-		prompt = config.Truncate(t.Prompt, 60)
+		b.WriteString(dimStyle.Render(t.Prompt))
+		b.WriteString("\n")
 	}
-
-	b.WriteString(detailTitleStyle.Render(fmt.Sprintf("Task %s — %s", m.viewTaskID, prompt)))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	viewH := m.outputViewHeight()
 

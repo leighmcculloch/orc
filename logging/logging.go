@@ -103,7 +103,7 @@ func ReadLog(date string) ([]string, error) {
 	f, err := os.Open(logPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no log file for date %s", date)
+			return nil, fmt.Errorf("no logs found for %s\n\n  Orc may not have been running on that date, or logs were cleared.", date)
 		}
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func StreamLog(date string, follow bool) (<-chan string, func(), error) {
 	f, err := os.Open(logPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil, fmt.Errorf("no log file for date %s", date)
+			return nil, nil, fmt.Errorf("no logs found for %s\n\n  Orc may not have been running on that date, or logs were cleared.", date)
 		}
 		return nil, nil, err
 	}

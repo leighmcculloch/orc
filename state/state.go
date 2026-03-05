@@ -187,7 +187,7 @@ func (s *Store) UpdateTask(id string, fn func(*Task)) error {
 	// Find the task across all slices
 	t, slice, idx := s.findTask(id)
 	if t == nil {
-		return fmt.Errorf("task %s not found", id)
+		return fmt.Errorf("task %s not found; use \"orc ls\" to see available tasks", id)
 	}
 
 	oldStatus := t.Status
@@ -213,7 +213,7 @@ func (s *Store) RemoveTask(id string) error {
 	defer s.mu.Unlock()
 	_, slice, idx := s.findTask(id)
 	if slice == nil {
-		return fmt.Errorf("task %s not found", id)
+		return fmt.Errorf("task %s not found; use \"orc ls\" to see available tasks", id)
 	}
 	*slice = append((*slice)[:idx], (*slice)[idx+1:]...)
 	return s.saveLocked()

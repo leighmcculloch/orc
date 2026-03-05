@@ -29,7 +29,7 @@ type Result struct {
 func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, envName string, logFn func(string, ...any)) Result {
 	env, ok := cfg.Environments[envName]
 	if !ok {
-		return Result{ExitCode: 1, Error: fmt.Errorf("environment %q not found", envName)}
+		return Result{ExitCode: 1, Error: fmt.Errorf("environment %q not found in %s", envName, config.ConfigPath())}
 	}
 
 	workDir := filepath.Join(config.OrcDir(), "workdirs", taskID)
@@ -64,7 +64,7 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 
 	agentCmd := cfg.Defaults.Command
 	if agentCmd == "" {
-		return Result{ExitCode: 1, Error: fmt.Errorf("command not set in config; set defaults.command in %s", config.ConfigPath())}
+		return Result{ExitCode: 1, Error: fmt.Errorf("no command configured; set \"command\" in %s", config.ConfigPath())}
 	}
 
 	// Append orc instructions to the prompt

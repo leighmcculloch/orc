@@ -74,11 +74,11 @@ func Load() (Config, error) {
 		if os.IsNotExist(err) {
 			return DefaultConfig(), nil
 		}
-		return Config{}, fmt.Errorf("reading config: %w", err)
+		return Config{}, fmt.Errorf("could not read %s: %w", path, err)
 	}
 	var cfg Config
 	if err := json.Unmarshal(jsonc.ToJSON(data), &cfg); err != nil {
-		return Config{}, fmt.Errorf("parsing config: %w", err)
+		return Config{}, fmt.Errorf("invalid config in %s: %w", path, err)
 	}
 	if cfg.Defaults.MaxConcurrent == 0 {
 		cfg.Defaults.MaxConcurrent = 3

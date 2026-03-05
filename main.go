@@ -54,7 +54,7 @@ func main() {
 	rootCmd.AddCommand(run, log, add, ls, rm, rpt)
 
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -91,7 +91,7 @@ func runCmd() *cobra.Command {
 
 func runOrchestrator() error {
 	if config.IsRunning() {
-		return fmt.Errorf("orc is already running")
+		return fmt.Errorf("orc is already running\n\n  The orchestrator appears to be running (pid file: %s).\n  If it crashed, remove the pid file and try again.", config.PidPath())
 	}
 
 	if err := ensureInitialized(); err != nil {
@@ -100,27 +100,27 @@ func runOrchestrator() error {
 
 	cfg, err := config.Load()
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return err
 	}
 
 	if cfg.Defaults.Command == "" {
-		return fmt.Errorf("command not set in config; set defaults.command in %s", config.ConfigPath())
+		return fmt.Errorf("no command configured\n\n  Set \"command\" in %s, e.g.:\n\n  {\n    \"defaults\": {\n      \"command\": \"claude -p \\\"$prompt\\\" --dangerously-skip-permissions\"\n    }\n  }", config.ConfigPath())
 	}
 
 	store, err := state.Load()
 	if err != nil {
-		return fmt.Errorf("loading state: %w", err)
+		return err
 	}
 
 	logger, err := logging.New()
 	if err != nil {
-		return fmt.Errorf("creating logger: %w", err)
+		return err
 	}
 	defer logger.Close()
 
 	orc, err := orchestrator.New(cfg, store, logger)
 	if err != nil {
-		return fmt.Errorf("creating orchestrator: %w", err)
+		return err
 	}
 
 	go func() {
@@ -317,7 +317,7 @@ func logCmd() *cobra.Command {
 
 				data, err := os.ReadFile(logPath)
 				if err != nil {
-					return fmt.Errorf("no output log for task %s", id)
+					return fmt.Errorf("no output log for task %s\n\n  The task may not have started yet, or the log file was removed.", id)
 				}
 				fmt.Print(string(data))
 				return nil
@@ -354,7 +354,7 @@ func logCmd() *cobra.Command {
 func streamFile(path string) {
 	f, err := os.Open(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: could not open log file: %s\n", path)
 		os.Exit(1)
 	}
 	defer f.Close()

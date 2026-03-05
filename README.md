@@ -84,7 +84,6 @@ Tasks queued while orc is stopped will be picked up the next time `orc run` star
 | `orc log` | View today's logs |
 | `orc report` | View today's completed task reports |
 | `orc init` | Initialize `.orc/` directory with default config |
-| `orc stop` | Stop the running orchestrator |
 | `orc help` | Show usage information |
 
 ### Adding Tasks
@@ -171,7 +170,7 @@ Orc stores all configuration and state in a `.orc/` directory in the current wor
   },
   "defaults": {
     "environment": "default",
-    "max_concurrent": 3,
+    "max_concurrent": 1,
     "agent_command": "claude -p \"$prompt\" --dangerously-skip-permissions"
   }
 }
@@ -183,7 +182,7 @@ Orc stores all configuration and state in a `.orc/` directory in the current wor
 |-------|-------------|---------|
 | `defaults.agent_command` | Shell command to run for each task. `$prompt` is replaced with the task prompt. **Required.** | *(none)* |
 | `defaults.environment` | Default environment for new tasks | `"default"` |
-| `defaults.max_concurrent` | Max agents running in parallel | `3` |
+| `defaults.max_concurrent` | Max agents running in parallel | `1` |
 
 The `agent_command` is run via `sh -c` with `$prompt` replaced by the task prompt.
 

@@ -25,7 +25,6 @@ orc status                                Show running/pending/completed counts
 orc log [-d YYYY-MM-DD] [-f] [-t <id>]   View/stream logs
 orc report [today|yesterday|YYYY-MM-DD]   View completed task reports
 orc init                                  Initialize .orc/ directory
-orc stop                                  Stop running orchestrator
 ```
 
 ## Architecture
@@ -77,7 +76,6 @@ All state and config lives in `.orc/` in the current working directory:
 
 - **Shared job files, no IPC.** CLI commands and the orchestrator read/write the same job files directly. No inbox/outbox protocol needed.
 - **pid file for liveness.** `.orc/orc.pid` is created on `orc run` and removed on shutdown. `config.IsRunning()` checks the pid file and validates the process is alive.
-- **`orc stop` sends SIGINT.** Reads the pid from the pid file and sends SIGINT to the orchestrator process.
 - **All JSON.** Config, job files, status files, reports — everything is JSON.
 - **Tasks stored in separate files by status.** `jobs/todo.json`, `jobs/scheduled.json`, `jobs/completed.json`, `jobs/failed.json`. `state.Store` uses `sync.Mutex` for concurrent updates. All writes are atomic (tmp+rename).
 - **Agent command is configurable.** Set `defaults.agent_command` in config. The `$prompt` placeholder is replaced with the task prompt. No default — must be configured.
@@ -97,7 +95,7 @@ All state and config lives in `.orc/` in the current working directory:
   },
   "defaults": {
     "environment": "default",
-    "max_concurrent": 3,
+    "max_concurrent": 1,
     "agent_command": "claude -p \"$prompt\" --dangerously-skip-permissions"
   }
 }

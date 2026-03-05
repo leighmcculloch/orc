@@ -8,7 +8,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/leighmcculloch/orc/agent"
@@ -47,8 +46,6 @@ func main() {
 		cmdReport(args)
 	case "init":
 		cmdInit(args)
-	case "stop":
-		cmdStop(args)
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -71,7 +68,6 @@ Usage:
   orc log [-d YYYY-MM-DD] [-f] [-t id]    View logs
   orc report [today|yesterday|YYYY-MM-DD]  View completed task reports
   orc init                                Initialize .orc directory with default config
-  orc stop                                Stop the running orchestrator
 
 Schedule formats:
   "every 5m"       Run every 5 minutes
@@ -479,31 +475,6 @@ func cmdInit(args []string) {
 	fmt.Println()
 	fmt.Println("Edit .orc/config.json to configure environments and settings.")
 	fmt.Println("Run 'orc run' to start the orchestrator.")
-}
-
-func cmdStop(args []string) {
-	fs := flag.NewFlagSet("orc stop", flag.ExitOnError)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: orc stop")
-		fmt.Fprintln(os.Stderr, "  Stop the running orchestrator")
-	}
-	fs.Parse(args)
-
-	pid, ok := config.RunningPid()
-	if !ok {
-		fmt.Println("orc is not running")
-		return
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error finding process: %v\n", err)
-		os.Exit(1)
-	}
-	if err := proc.Signal(syscall.SIGINT); err != nil {
-		fmt.Fprintf(os.Stderr, "error sending signal: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Println("orc stop signal sent")
 }
 
 func loadTasks() []state.Task {

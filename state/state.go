@@ -140,22 +140,6 @@ func (s *Store) TasksByStatus(status TaskStatus) []Task {
 	return result
 }
 
-func (s *Store) CompletedOnDate(date time.Time) []Task {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	y, m, d := date.Date()
-	var result []Task
-	for _, t := range s.Tasks {
-		if t.FinishedAt != nil {
-			ty, tm, td := t.FinishedAt.Date()
-			if ty == y && tm == m && td == d {
-				result = append(result, t)
-			}
-		}
-	}
-	return result
-}
-
 func (s *Store) AllTasks() []Task {
 	s.mu.Lock()
 	defer s.mu.Unlock()

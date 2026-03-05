@@ -98,10 +98,6 @@ func (l *Logger) Close() error {
 	return l.file.Close()
 }
 
-func TaskLogPath(taskID string) string {
-	return filepath.Join(config.OrcDir(), "logs", fmt.Sprintf("task-%s.log", taskID))
-}
-
 func ReadLog(date string) ([]string, error) {
 	logPath := filepath.Join(config.OrcDir(), "logs", fmt.Sprintf("orc-%s.log", date))
 	f, err := os.Open(logPath)

@@ -50,41 +50,6 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 		return Result{ExitCode: 1, Error: fmt.Errorf("writing orc-add script: %w", err)}
 	}
 
-	// Run pre-hooks
-	for _, hook := range env.PreHooks {
-		logFn("running pre-hook: %s", hook)
-		writeStatus(workDir, ProcessStatus{
-			TaskID:    taskID,
-			Status:    "running_hook",
-			UpdatedAt: time.Now(),
-			Message:   hook,
-		})
-		hookCmd := exec.CommandContext(ctx, "sh", "-c", hook)
-		hookDir := env.WorkDir
-		if hookDir == "" || hookDir == "." {
-			hookDir, _ = os.Getwd()
-		}
-		hookCmd.Dir = hookDir
-		hookLog, err := os.OpenFile(
-			filepath.Join(workDir, "output.log"),
-			os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644,
-		)
-		if err == nil {
-			hookCmd.Stdout = hookLog
-			hookCmd.Stderr = hookLog
-		}
-		if err := hookCmd.Run(); err != nil {
-			if hookLog != nil {
-				hookLog.Close()
-			}
-			logFn("pre-hook failed: %s: %v", hook, err)
-			return Result{ExitCode: 1, Error: fmt.Errorf("pre-hook %q failed: %w", hook, err)}
-		}
-		if hookLog != nil {
-			hookLog.Close()
-		}
-	}
-
 	writeStatus(workDir, ProcessStatus{
 		TaskID:    taskID,
 		Status:    "running",

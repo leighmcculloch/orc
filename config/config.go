@@ -13,9 +13,8 @@ type Config struct {
 }
 
 type Environment struct {
-	Name     string   `json:"name"`
-	WorkDir  string   `json:"work_dir"`
-	PreHooks []string `json:"pre_hooks"`
+	Name    string `json:"name"`
+	WorkDir string `json:"work_dir"`
 }
 
 type Defaults struct {
@@ -30,9 +29,8 @@ func DefaultConfig() Config {
 	return Config{
 		Environments: map[string]Environment{
 			"default": {
-				Name:     "default",
-				WorkDir:  ".",
-				PreHooks: []string{},
+				Name:    "default",
+				WorkDir: ".",
 			},
 		},
 		Defaults: Defaults{

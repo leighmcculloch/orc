@@ -38,7 +38,7 @@ orc/
 │   ├── state/state.go                   Task model, Store with mutex-protected JSON persistence
 │   ├── orchestrator/orchestrator.go     Core engine: main loop, inbox polling, task dispatch
 │   ├── orchestrator/schedule.go         Schedule parsing + ID generation
-│   ├── claude/claude.go                 Claude Code process lifecycle (pre-hooks, exec, report)
+│   ├── agent/agent.go                   Agent process lifecycle (exec, subtask support)
 │   ├── ipc/ipc.go                       File-based IPC (inbox/outbox JSON files, pid file)
 │   ├── logging/logging.go              Per-day + per-task log files, streaming
 │   ├── report/report.go                Daily report catalogue (completed task summaries)
@@ -78,7 +78,6 @@ All state and config lives in `.orc/` in the current working directory:
 - **State file is mutex-protected.** `state.Store` uses `sync.Mutex` for concurrent task updates from goroutines. Writes are atomic (tmp+rename).
 - **Agent command is configurable.** Defaults to `silo claude -- -p "$prompt"`. The `$prompt` placeholder is replaced with the task prompt.
 - **Tasks can create subtasks.** Orc instructions are appended to every prompt telling agents how to use `.orc/bin/orc-add "prompt"` to submit new tasks. The helper script writes IPC JSON to the inbox.
-- **Pre-hooks run before the agent.** Each environment config has `pre_hooks` (shell commands) that execute in the environment's `work_dir` before the agent starts.
 - **Scheduled tasks stay in the task list.** After completing, the orchestrator resets them to pending when the next scheduled time arrives.
 - **TUI uses bubbletea with alt screen.** Refreshes every 1s via tick, receives events from orchestrator via channel.
 
@@ -89,13 +88,11 @@ All state and config lives in `.orc/` in the current working directory:
   "environments": {
     "default": {
       "name": "default",
-      "work_dir": ".",
-      "pre_hooks": []
+      "work_dir": "."
     },
     "myproject": {
       "name": "myproject",
-      "work_dir": "/path/to/project",
-      "pre_hooks": ["git pull", "npm install"]
+      "work_dir": "/path/to/project"
     }
   },
   "defaults": {
@@ -120,9 +117,8 @@ The `agent_command` is run via `sh -c` with `$prompt` replaced by the task promp
 
 1. Task created (status: `pending`) — via `orc add` or IPC
 2. Orchestrator picks it up when a slot is available (status: `running`)
-3. Pre-hooks execute in environment's work_dir
-4. Agent command runs, stdout streamed to log
-5. On completion, task marked `completed` or `failed`
+3. Agent command runs, stdout streamed to log
+4. On completion, task marked `completed` or `failed`
 6. Entry recorded in daily report (`reports/YYYY-MM-DD.json`)
 7. For scheduled tasks: reset to `pending` when next run time arrives
 
@@ -154,8 +150,5 @@ When orc is not running, `orc add` and `orc list` fall back to reading/writing `
 - No task dependencies or DAG ordering
 - No retry logic for failed tasks
 - No task timeout/kill mechanism
-- pid file liveness check doesn't verify the process is actually alive
 - No `orc edit` command to modify existing tasks
-- TUI doesn't support scrolling or task detail view
 - Log streaming (`orc log -f`) uses file polling, not inotify
-- `generateID()` in main.go uses time-based bytes (less random than orchestrator's crypto/rand version)

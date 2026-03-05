@@ -213,6 +213,9 @@ func (m *model) loadOutput() {
 	}
 	defer f.Close()
 
+	// Capture whether we're at the bottom before updating lines
+	wasAtBottom := m.outputScroll >= m.maxOutputScroll()
+
 	var lines []string
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
@@ -221,12 +224,8 @@ func (m *model) loadOutput() {
 	}
 	m.outputLines = lines
 
-	// Auto-scroll to bottom if already at bottom
-	prevMax := len(m.outputLines) - m.outputViewHeight()
-	if prevMax < 0 {
-		prevMax = 0
-	}
-	if m.outputScroll >= prevMax-1 || m.outputScroll == 0 {
+	// Auto-scroll to bottom if we were already at the bottom
+	if wasAtBottom {
 		m.outputScroll = m.maxOutputScroll()
 	}
 }

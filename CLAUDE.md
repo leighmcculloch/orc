@@ -49,7 +49,7 @@ All state and config lives in `.orc/` in the current working directory:
 
 ```
 .orc/
-├── config.jsonc          # environments, defaults (max_concurrent, agent_command)
+├── config.jsonc          # environments, defaults (max_concurrent, command)
 ├── jobs/
 │   ├── meta.json        # next task ID counter
 │   ├── todo.json        # pending + running tasks
@@ -78,7 +78,7 @@ All state and config lives in `.orc/` in the current working directory:
 - **pid file for liveness.** `.orc/orc.pid` is created on `orc run` and removed on shutdown. `config.IsRunning()` checks the pid file and validates the process is alive.
 - **All JSON.** Config, job files, status files, reports — everything is JSON.
 - **Tasks stored in separate files by status.** `jobs/todo.json`, `jobs/scheduled.json`, `jobs/completed.json`, `jobs/failed.json`. `state.Store` uses `sync.Mutex` for concurrent updates. All writes are atomic (tmp+rename).
-- **Agent command is configurable.** Set `defaults.agent_command` in config. The `$prompt` placeholder is replaced with the task prompt. No default — must be configured.
+- **Agent command is configurable.** Set `defaults.command` in config. The `$prompt` placeholder is replaced with the task prompt. No default — must be configured.
 - **Tasks can create subtasks.** Orc instructions are appended to every prompt telling agents how to use `.orc/bin/orc-add "prompt"`. The script drops a prompt file into `jobs/inbox/` which the orchestrator picks up.
 - **Scheduled tasks stay in the task list.** After completing, the orchestrator resets them to pending when the next scheduled time arrives.
 - **TUI uses bubbletea with alt screen.** Refreshes every 1s via tick, receives events from orchestrator via channel.
@@ -96,28 +96,28 @@ All state and config lives in `.orc/` in the current working directory:
   "defaults": {
     "environment": "default",
     "max_concurrent": 1,
-    "agent_command": "claude -p \"$prompt\" --dangerously-skip-permissions"
+    "command": "claude -p \"$prompt\" --dangerously-skip-permissions"
   }
 }
 ```
 
-The `agent_command` is run via `sh -c` with `$prompt` replaced by the task prompt. This field is required — orc will error if it is not set.
+The `command` is run via `sh -c` with `$prompt` replaced by the task prompt. This field is required — orc will error if it is not set.
 
 ### Examples
 
 Using Claude Code directly:
 ```json
-"agent_command": "claude -p \"$prompt\" --dangerously-skip-permissions"
+"command": "claude -p \"$prompt\" --dangerously-skip-permissions"
 ```
 
 Using [silo](https://github.com/leighmcculloch/silo) for container isolation:
 ```json
-"agent_command": "silo claude -v -- -p \"$prompt\" --dangerously-skip-permissions"
+"command": "silo claude -v -- -p \"$prompt\" --dangerously-skip-permissions"
 ```
 
 Using silo with GitHub Copilot:
 ```json
-"agent_command": "silo copilot -v -- --model claude-opus-4.6 --allow-all-tools -p \"$prompt\""
+"command": "silo copilot -v -- --model claude-opus-4.6 --allow-all-tools -p \"$prompt\""
 ```
 
 ## Task Lifecycle

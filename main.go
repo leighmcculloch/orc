@@ -103,6 +103,10 @@ func runOrchestrator() error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
+	if cfg.Defaults.Command == "" {
+		return fmt.Errorf("command not set in config; set defaults.command in %s", config.ConfigPath())
+	}
+
 	store, err := state.Load()
 	if err != nil {
 		return fmt.Errorf("loading state: %w", err)

@@ -23,7 +23,7 @@ type Environment struct {
 type Defaults struct {
 	Environment   string `json:"environment"`
 	MaxConcurrent int    `json:"max_concurrent"`
-	AgentCommand  string `json:"agent_command"`
+	Command       string `json:"command"`
 }
 
 func DefaultConfig() Config {

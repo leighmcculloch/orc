@@ -17,7 +17,7 @@ Orc is a terminal app that manages a fleet of AI coding agent processes — brin
 > Built using AI. This is an experimental tool. Use at your own risk.
 
 > [!WARNING]
-> Orc runs agents autonomously. Depending on your configured `agent_command`, agents may execute commands, write files, and make changes **without asking for confirmation**. Only run orc in environments where you are comfortable with fully autonomous agent operation.
+> Orc runs agents autonomously. Depending on your configured `command`, agents may execute commands, write files, and make changes **without asking for confirmation**. Only run orc in environments where you are comfortable with fully autonomous agent operation.
 
 ## Quick Start
 
@@ -65,9 +65,9 @@ Orc runs as a **foreground process** with a TUI. It is not a daemon. All CLI com
 │  manages agents      │
 └──────────────────────┘
          │
-         ├── agent_command "task 1"
-         ├── agent_command "task 2"
-         └── agent_command "task 3"
+         ├── command "task 1"
+         ├── command "task 2"
+         └── command "task 3"
 ```
 
 Tasks queued while orc is stopped will be picked up the next time `orc run` starts.
@@ -150,7 +150,7 @@ go build -o orc .
 ### Prerequisites
 
 - **Go 1.24+**: To build/install orc
-- **An AI coding agent CLI**: Configure via `agent_command` in `.orc/config.jsonc` (see [Configuration](#configuration))
+- **An AI coding agent CLI**: Configure via `command` in `.orc/config.jsonc` (see [Configuration](#configuration))
 
 ## Configuration
 
@@ -171,7 +171,7 @@ Orc stores all configuration and state in a `.orc/` directory in the current wor
   "defaults": {
     "environment": "default",
     "max_concurrent": 1,
-    "agent_command": "claude -p \"$prompt\" --dangerously-skip-permissions"
+    "command": "claude -p \"$prompt\" --dangerously-skip-permissions"
   }
 }
 ```
@@ -180,27 +180,27 @@ Orc stores all configuration and state in a `.orc/` directory in the current wor
 
 | Field | Description | Default |
 |-------|-------------|---------|
-| `defaults.agent_command` | Shell command to run for each task. `$prompt` is replaced with the task prompt. **Required.** | *(none)* |
+| `defaults.command` | Shell command to run for each task. `$prompt` is replaced with the task prompt. **Required.** | *(none)* |
 | `defaults.environment` | Default environment for new tasks | `"default"` |
 | `defaults.max_concurrent` | Max agents running in parallel | `1` |
 
-The `agent_command` is run via `sh -c` with `$prompt` replaced by the task prompt.
+The `command` is run via `sh -c` with `$prompt` replaced by the task prompt.
 
-### Agent Command Examples
+### Command Examples
 
 Using Claude Code directly:
 ```json
-"agent_command": "claude -p \"$prompt\" --dangerously-skip-permissions"
+"command": "claude -p \"$prompt\" --dangerously-skip-permissions"
 ```
 
 Using [silo](https://github.com/leighmcculloch/silo) for container isolation with Claude Code:
 ```json
-"agent_command": "silo claude -v -- -p \"$prompt\" --dangerously-skip-permissions"
+"command": "silo claude -v -- -p \"$prompt\" --dangerously-skip-permissions"
 ```
 
 Using silo with GitHub Copilot:
 ```json
-"agent_command": "silo copilot -v -- --model claude-opus-4.6 --allow-all-tools -p \"$prompt\""
+"command": "silo copilot -v -- --model claude-opus-4.6 --allow-all-tools -p \"$prompt\""
 ```
 
 ### Environments
@@ -306,7 +306,7 @@ When a task completes, it's recorded in `.orc/reports/YYYY-MM-DD.json`:
                      │ slot available
                      ▼
               ┌──────────────┐
-              │   running    │ agent_command
+              │   running    │ command
               └──┬───────┬───┘
                  │       │
           success│       │error/exit!=0
@@ -322,7 +322,7 @@ When a task completes, it's recorded in `.orc/reports/YYYY-MM-DD.json`:
 
 1. **Created** — task added via `orc add` or `orc-add` (status: `pending`)
 2. **Dispatched** — orchestrator picks it up when a concurrency slot opens (status: `running`)
-3. **Agent runs** — `agent_command` executed via `sh -c`, output streamed to log
+3. **Agent runs** — `command` executed via `sh -c`, output streamed to log
 4. **Completed or Failed** — exit code checked
 6. **Catalogued** — entry added to daily report file
 7. **Re-scheduled** — for scheduled tasks, status resets to `pending` when the next run time arrives
@@ -403,7 +403,7 @@ orc run
   "defaults": {
     "environment": "default",
     "max_concurrent": 2,
-    "agent_command": "claude -p \"$prompt\" --dangerously-skip-permissions"
+    "command": "claude -p \"$prompt\" --dangerously-skip-permissions"
   }
 }
 ```

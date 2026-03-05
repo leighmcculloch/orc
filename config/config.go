@@ -104,3 +104,10 @@ func Save(cfg Config) error {
 	}
 	return os.WriteFile(ConfigPath(), data, 0644)
 }
+
+func Truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}

@@ -264,7 +264,7 @@ func printTasks(tasks []state.Task) {
 		if sched == "" {
 			sched = "-"
 		}
-		fmt.Printf("%-10s %-12s %-15s %-10s %s\n", t.ID, t.Status, t.Environment, sched, truncate(t.Prompt, 40))
+		fmt.Printf("%-10s %-12s %-15s %-10s %s\n", t.ID, t.Status, t.Environment, sched, config.Truncate(t.Prompt, 40))
 	}
 }
 
@@ -533,13 +533,6 @@ func cmdStop() {
 	}
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
-}
-
 func loadTasks() []state.Task {
 	if ipc.IsRunning() {
 		resp, err := ipc.SendCommand(ipc.Request{Command: ipc.CmdListTasks})
@@ -565,7 +558,7 @@ func tasksToItems(tasks []state.Task) []pick.Item {
 		}
 		items[i] = pick.Item{
 			ID:    t.ID,
-			Label: fmt.Sprintf("%-10s %-12s %s%s", t.ID, t.Status, truncate(t.Prompt, 50), sched),
+			Label: fmt.Sprintf("%-10s %-12s %s%s", t.ID, t.Status, config.Truncate(t.Prompt, 50), sched),
 		}
 	}
 	return items

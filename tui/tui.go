@@ -349,7 +349,7 @@ func (m model) viewDashboardScreen() string {
 			icon = "-"
 		}
 		ts := evt.Time.Format("15:04:05")
-		b.WriteString(logStyle.Render(fmt.Sprintf("  %s %s %s %s", ts, icon, evt.TaskID, truncate(evt.Message, 60))))
+		b.WriteString(logStyle.Render(fmt.Sprintf("  %s %s %s %s", ts, icon, evt.TaskID, config.Truncate(evt.Message, 60))))
 		b.WriteString("\n")
 	}
 
@@ -367,12 +367,12 @@ func (m model) renderTaskLine(idx int, t state.Task, style lipgloss.Style, icon 
 	} else if t.Schedule != "" {
 		extra = fmt.Sprintf(" [%s]", t.Schedule)
 	} else if t.Status == state.TaskFailed && t.Error != "" {
-		extra = fmt.Sprintf(": %s", truncate(t.Error, 30))
+		extra = fmt.Sprintf(": %s", config.Truncate(t.Error, 30))
 	} else if t.FinishedAt != nil {
 		extra = fmt.Sprintf(" (%s ago)", time.Since(*t.FinishedAt).Truncate(time.Second))
 	}
 
-	line := fmt.Sprintf("  %s %s %s%s", icon, t.ID, truncate(t.Prompt, 55), extra)
+	line := fmt.Sprintf("  %s %s %s%s", icon, t.ID, config.Truncate(t.Prompt, 55), extra)
 
 	if idx == m.cursor {
 		return selectedStyle.Render(style.Render(line))
@@ -387,7 +387,7 @@ func (m model) viewTaskOutputScreen() string {
 	prompt := m.viewTaskID
 	store := m.orc.Store()
 	if t, ok := store.GetTask(m.viewTaskID); ok {
-		prompt = truncate(t.Prompt, 60)
+		prompt = config.Truncate(t.Prompt, 60)
 	}
 
 	b.WriteString(detailTitleStyle.Render(fmt.Sprintf("Task %s — %s", m.viewTaskID, prompt)))
@@ -441,13 +441,6 @@ func filterRecentFinished(tasks []state.Task, status state.TaskStatus, limit int
 		result = result[len(result)-limit:]
 	}
 	return result
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
 }
 
 func Run(orc *orchestrator.Orchestrator) error {

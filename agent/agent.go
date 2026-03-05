@@ -150,7 +150,7 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 			TaskID:    taskID,
 			Status:    "running",
 			UpdatedAt: time.Now(),
-			Message:   truncate(line, 200),
+			Message:   config.Truncate(line, 200),
 		})
 	}
 
@@ -252,11 +252,4 @@ func writeStatus(workDir string, status ProcessStatus) {
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
 }

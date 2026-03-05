@@ -1,8 +1,6 @@
 package orchestrator
 
 import (
-	"crypto/rand"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -46,10 +44,4 @@ func nextScheduleTime(schedule string) time.Time {
 
 	// Default: 1 hour from now
 	return now.Add(time.Hour)
-}
-
-func generateID() string {
-	b := make([]byte, 4)
-	rand.Read(b)
-	return fmt.Sprintf("%x", b)
 }

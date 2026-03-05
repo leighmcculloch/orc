@@ -316,7 +316,6 @@ func (o *Orchestrator) handleAddTask(payload json.RawMessage) ipc.Response {
 	}
 
 	task := state.Task{
-		ID:          generateID(),
 		Prompt:      p.Prompt,
 		Environment: env,
 		Schedule:    p.Schedule,
@@ -324,7 +323,8 @@ func (o *Orchestrator) handleAddTask(payload json.RawMessage) ipc.Response {
 		CreatedAt:   time.Now(),
 	}
 
-	if err := o.store.AddTask(task); err != nil {
+	task, err := o.store.AddTask(task)
+	if err != nil {
 		return ipc.Response{OK: false, Error: err.Error()}
 	}
 

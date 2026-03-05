@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -218,7 +217,6 @@ func cmdAdd(args []string) {
 	}
 
 	task := state.Task{
-		ID:          generateID(),
 		Prompt:      prompt,
 		Environment: taskEnv,
 		Schedule:    schedule,
@@ -226,7 +224,8 @@ func cmdAdd(args []string) {
 		CreatedAt:   time.Now(),
 	}
 
-	if err := store.AddTask(task); err != nil {
+	task, err = store.AddTask(task)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -593,10 +592,4 @@ func pickTask(title string) string {
 		return ""
 	}
 	return item.ID
-}
-
-func generateID() string {
-	b := make([]byte, 4)
-	rand.Read(b)
-	return fmt.Sprintf("%x", b)
 }

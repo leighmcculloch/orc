@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -36,9 +37,10 @@ type Task struct {
 }
 
 type Store struct {
-	Tasks     []Task    `json:"tasks"`
-	UpdatedAt time.Time `json:"updated_at"`
-	mu        sync.Mutex
+	NextTaskID int       `json:"next_id"`
+	Tasks      []Task    `json:"tasks"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	mu         sync.Mutex
 }
 
 func statePath() string {
@@ -50,7 +52,7 @@ func Load() (*Store, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &Store{Tasks: []Task{}}, nil
+			return &Store{NextTaskID: 1, Tasks: []Task{}}, nil
 		}
 		return nil, fmt.Errorf("reading state: %w", err)
 	}
@@ -86,11 +88,16 @@ func (s *Store) saveLocked() error {
 	return os.Rename(tmp, statePath())
 }
 
-func (s *Store) AddTask(task Task) error {
+func (s *Store) AddTask(task Task) (Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.NextTaskID == 0 {
+		s.NextTaskID = 1
+	}
+	task.ID = strconv.Itoa(s.NextTaskID)
+	s.NextTaskID++
 	s.Tasks = append(s.Tasks, task)
-	return s.saveLocked()
+	return task, s.saveLocked()
 }
 
 func (s *Store) UpdateTask(id string, fn func(*Task)) error {

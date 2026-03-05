@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -425,17 +426,25 @@ func streamFile(path string) {
 	}
 	defer f.Close()
 
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+	defer signal.Stop(sig)
+
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	for scanner.Scan() {
 		fmt.Println(scanner.Text())
 	}
 
-	// Tail the file
+	// Tail the file until interrupted
 	for {
-		time.Sleep(500 * time.Millisecond)
-		for scanner.Scan() {
-			fmt.Println(scanner.Text())
+		select {
+		case <-sig:
+			return
+		case <-time.After(500 * time.Millisecond):
+			for scanner.Scan() {
+				fmt.Println(scanner.Text())
+			}
 		}
 	}
 }

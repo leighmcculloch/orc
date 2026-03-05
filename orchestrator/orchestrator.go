@@ -28,6 +28,7 @@ type Orchestrator struct {
 	maxConcurrent int
 	stopCh        chan struct{}
 	eventCh       chan Event
+	wg            sync.WaitGroup
 
 	schedules map[string]*scheduleEntry
 }
@@ -114,11 +115,16 @@ func (o *Orchestrator) Run() error {
 	for {
 		select {
 		case <-o.ctx.Done():
-			o.logger.Log("orc shutting down")
+			o.logger.Log("orc shutting down, waiting for running tasks...")
+			o.wg.Wait()
+			o.logger.Log("orc shutdown complete")
 			return nil
 		case <-o.stopCh:
 			o.logger.Log("orc received stop command")
 			o.cancel()
+			o.logger.Log("waiting for running tasks...")
+			o.wg.Wait()
+			o.logger.Log("orc shutdown complete")
 			return nil
 		case <-ticker.C:
 			o.pollInbox()
@@ -191,6 +197,7 @@ func (o *Orchestrator) startTask(task state.Task) {
 	o.mu.Lock()
 	o.runningCount++
 	o.mu.Unlock()
+	o.wg.Add(1)
 
 	now := time.Now()
 	o.store.UpdateTask(task.ID, func(t *state.Task) {
@@ -202,6 +209,7 @@ func (o *Orchestrator) startTask(task state.Task) {
 	o.emit(Event{Type: EventTaskStarted, TaskID: task.ID, Message: task.Prompt})
 
 	go func() {
+		defer o.wg.Done()
 		defer func() {
 			o.mu.Lock()
 			o.runningCount--

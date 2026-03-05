@@ -511,8 +511,12 @@ func cmdInit() {
 		os.Exit(1)
 	}
 
-	// Create empty state
-	store := &state.Store{Tasks: []state.Task{}}
+	// Create empty jobs files
+	store, err := state.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
 	if err := store.Save(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

@@ -52,7 +52,12 @@ All state and config lives in `.orc/` in the current working directory:
 ```
 .orc/
 ├── config.json          # environments, defaults (max_concurrent, agent_command)
-├── state.json           # task list with statuses (atomic write via tmp+rename)
+├── jobs/
+│   ├── meta.json        # next task ID counter
+│   ├── todo.json        # pending + running tasks
+│   ├── scheduled.json   # scheduled tasks
+│   ├── completed.json   # completed tasks
+│   └── failed.json      # failed + cancelled tasks
 ├── orc.pid              # pid file, exists only while orchestrator is running
 ├── bin/
 │   └── orc-add              # helper script for agents to create subtasks
@@ -75,7 +80,7 @@ All state and config lives in `.orc/` in the current working directory:
 - **File-based IPC, not sockets.** CLI writes JSON command files to `.orc/inbox/`, orchestrator polls every 1s, processes them, writes responses to `.orc/outbox/`. CLI polls outbox for response (100ms interval, 30s timeout). Atomic writes via tmp+rename prevent partial reads.
 - **pid file for liveness.** `.orc/orc.pid` is created on `orc run` and removed on shutdown. `ipc.IsRunning()` checks for this file.
 - **All JSON.** Config, state, IPC messages, status files, reports — everything is JSON.
-- **State file is mutex-protected.** `state.Store` uses `sync.Mutex` for concurrent task updates from goroutines. Writes are atomic (tmp+rename).
+- **Tasks stored in separate files by status.** `jobs/todo.json`, `jobs/scheduled.json`, `jobs/completed.json`, `jobs/failed.json`. `state.Store` uses `sync.Mutex` for concurrent updates. All writes are atomic (tmp+rename).
 - **Agent command is configurable.** Set `defaults.agent_command` in config. The `$prompt` placeholder is replaced with the task prompt. No default — must be configured.
 - **Tasks can create subtasks.** Orc instructions are appended to every prompt telling agents how to use `.orc/bin/orc-add "prompt"` to submit new tasks. The helper script writes IPC JSON to the inbox.
 - **Scheduled tasks stay in the task list.** After completing, the orchestrator resets them to pending when the next scheduled time arrives.

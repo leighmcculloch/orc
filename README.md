@@ -237,7 +237,12 @@ Environments let you define named configurations for different projects or conte
 ```
 .orc/
 ├── config.json                 Configuration file
-├── state.json                  Task list and statuses
+├── jobs/
+│   ├── meta.json               Next task ID counter
+│   ├── todo.json               Pending + running tasks
+│   ├── scheduled.json          Scheduled tasks
+│   ├── completed.json          Completed tasks
+│   └── failed.json             Failed + cancelled tasks
 ├── orc.pid                     PID file (exists while orc is running)
 ├── inbox/                      IPC: incoming command files
 ├── outbox/                     IPC: response files
@@ -253,9 +258,19 @@ Environments let you define named configurations for different projects or conte
     └── 2025-03-15.json         Daily catalogue of completed tasks
 ```
 
-### State File
+### Job Files
 
-`.orc/state.json` tracks all tasks. It is written atomically (write to tmp file, then rename) to prevent corruption. The orchestrator holds a mutex to serialize concurrent updates from multiple agent goroutines.
+Tasks are stored in `.orc/jobs/` across separate files by status:
+
+| File | Contents |
+|------|----------|
+| `todo.json` | Pending and running tasks |
+| `scheduled.json` | Tasks with a schedule |
+| `completed.json` | Successfully completed tasks |
+| `failed.json` | Failed and cancelled tasks |
+| `meta.json` | Next task ID counter |
+
+All files are written atomically (write to tmp file, then rename) to prevent corruption. The orchestrator holds a mutex to serialize concurrent updates from multiple agent goroutines.
 
 ### Work Directories
 

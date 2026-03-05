@@ -150,7 +150,7 @@ go build -o orc .
 ### Prerequisites
 
 - **Go 1.24+**: To build/install orc
-- **An AI coding agent CLI**: Configure via `agent_command` in `.orc/config.json` (see [Configuration](#configuration))
+- **An AI coding agent CLI**: Configure via `agent_command` in `.orc/config.jsonc` (see [Configuration](#configuration))
 
 ## Configuration
 
@@ -158,7 +158,7 @@ Orc stores all configuration and state in a `.orc/` directory in the current wor
 
 ### Configuration File
 
-`.orc/config.json`:
+`.orc/config.jsonc`:
 
 ```json
 {
@@ -235,7 +235,7 @@ Environments let you define named configurations for different projects or conte
 
 ```
 .orc/
-├── config.json                 Configuration file
+├── config.jsonc                 Configuration file
 ├── jobs/
 │   ├── meta.json               Next task ID counter
 │   ├── todo.json               Pending + running tasks

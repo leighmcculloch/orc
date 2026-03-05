@@ -49,7 +49,7 @@ All state and config lives in `.orc/` in the current working directory:
 
 ```
 .orc/
-├── config.json          # environments, defaults (max_concurrent, agent_command)
+├── config.jsonc          # environments, defaults (max_concurrent, agent_command)
 ├── jobs/
 │   ├── meta.json        # next task ID counter
 │   ├── todo.json        # pending + running tasks
@@ -83,7 +83,7 @@ All state and config lives in `.orc/` in the current working directory:
 - **Scheduled tasks stay in the task list.** After completing, the orchestrator resets them to pending when the next scheduled time arrives.
 - **TUI uses bubbletea with alt screen.** Refreshes every 1s via tick, receives events from orchestrator via channel.
 
-## Config Format (.orc/config.json)
+## Config Format (.orc/config.jsonc)
 
 ```json
 {

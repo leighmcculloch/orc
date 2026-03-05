@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+
+	"github.com/tidwall/jsonc"
 )
 
 type Config struct {
@@ -62,7 +64,7 @@ func EnsureOrcDir() error {
 }
 
 func ConfigPath() string {
-	return filepath.Join(OrcDir(), "config.json")
+	return filepath.Join(OrcDir(), "config.jsonc")
 }
 
 func Load() (Config, error) {
@@ -75,7 +77,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("reading config: %w", err)
 	}
 	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := json.Unmarshal(jsonc.ToJSON(data), &cfg); err != nil {
 		return Config{}, fmt.Errorf("parsing config: %w", err)
 	}
 	if cfg.Defaults.MaxConcurrent == 0 {

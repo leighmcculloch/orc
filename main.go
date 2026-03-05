@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/leighmcculloch/orc/agent"
 	"github.com/leighmcculloch/orc/config"
 	"github.com/leighmcculloch/orc/logging"
 	"github.com/leighmcculloch/orc/orchestrator"
@@ -72,10 +71,7 @@ func ensureInitialized() error {
 	if err != nil {
 		return err
 	}
-	if err := store.Save(); err != nil {
-		return err
-	}
-	return agent.WriteOrcAddScript()
+	return store.Save()
 }
 
 func runCmd() *cobra.Command {

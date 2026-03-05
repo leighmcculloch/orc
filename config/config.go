@@ -53,7 +53,6 @@ func EnsureOrcDir() error {
 		filepath.Join(OrcDir(), "jobs"),
 		filepath.Join(OrcDir(), "jobs", "inbox"),
 		filepath.Join(OrcDir(), "reports"),
-		filepath.Join(OrcDir(), "bin"),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {

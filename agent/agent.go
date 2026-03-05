@@ -44,12 +44,6 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 		UpdatedAt: time.Now(),
 	})
 
-	// Ensure orc-add helper script exists
-	if err := WriteOrcAddScript(); err != nil {
-		logFn("failed to write orc-add script: %v", err)
-		return Result{ExitCode: 1, Error: fmt.Errorf("writing orc-add script: %w", err)}
-	}
-
 	writeStatus(workDir, ProcessStatus{
 		TaskID:    taskID,
 		Status:    "running",
@@ -68,7 +62,8 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 	}
 
 	// Append orc instructions to the prompt
-	fullPrompt := prompt + "\n\n" + orcInstructions()
+	absInbox, _ := filepath.Abs(filepath.Join(config.OrcDir(), "jobs", "inbox"))
+	fullPrompt := prompt + "\n\n" + orcInstructions(absInbox)
 
 	// Write prompt to a file so it can be safely passed to the shell command
 	promptPath := filepath.Join(workDir, "prompt.txt")
@@ -154,49 +149,16 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 }
 
 // orcInstructions returns instructions appended to every agent prompt explaining
-// how to create subtasks via the orc-add helper script.
-func orcInstructions() string {
-	return `--- ORC INSTRUCTIONS ---
+// how to create subtasks by writing prompt files to the inbox directory.
+func orcInstructions(inboxDir string) string {
+	return fmt.Sprintf(`--- ORC INSTRUCTIONS ---
 You are running as a task inside orc, a task orchestrator.
-You can create new tasks for other agents to work on by running:
+To create a subtask for another agent, write the prompt to a .txt file in the inbox:
 
-  .orc/bin/orc-add "your task prompt here"
+  echo "your task prompt" > %s/$(date +%%s)-$RANDOM.txt
 
-This will submit the task to orc's queue and it will be picked up by another agent.
-Use this when a subtask is independent and can be done in parallel.
-Do not create subtasks for work you can do yourself in the current session.`
-}
-
-// WriteOrcAddScript writes the orc-add helper script to .orc/bin/orc-add.
-// The script writes a prompt file to .orc/jobs/inbox/ for the orchestrator to pick up.
-func WriteOrcAddScript() error {
-	binDir := filepath.Join(config.OrcDir(), "bin")
-	if err := os.MkdirAll(binDir, 0755); err != nil {
-		return err
-	}
-
-	absInbox, err := filepath.Abs(filepath.Join(config.OrcDir(), "jobs", "inbox"))
-	if err != nil {
-		return fmt.Errorf("resolving inbox path: %w", err)
-	}
-
-	script := fmt.Sprintf(`#!/bin/sh
-set -e
-prompt="$*"
-if [ -z "$prompt" ]; then
-  echo "usage: orc-add <prompt>" >&2
-  exit 1
-fi
-id=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')
-inbox=%s
-mkdir -p "$inbox"
-tmp="$inbox/$id.txt.tmp"
-printf '%%s' "$prompt" > "$tmp"
-mv "$tmp" "$inbox/$id.txt"
-echo "task submitted: $id"
-`, shellQuote(absInbox))
-	scriptPath := filepath.Join(binDir, "orc-add")
-	return os.WriteFile(scriptPath, []byte(script), 0755)
+Use subtasks only for independent work that can be done in parallel.
+Do not create subtasks for work you can do yourself.`, inboxDir)
 }
 
 func writeStatus(workDir string, status ProcessStatus) {

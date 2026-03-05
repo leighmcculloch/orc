@@ -324,7 +324,7 @@ When a task completes, it's recorded in `.orc/reports/YYYY-MM-DD.json`:
               recorded in daily report
 ```
 
-1. **Created** — task added via `orc add` or `orc-add` (status: `pending`)
+1. **Created** — task added via `orc add` or by a subtask writing to `jobs/inbox/` (status: `pending`)
 2. **Dispatched** — orchestrator picks it up when a concurrency slot opens (status: `running`)
 3. **Agent runs** — `command` executed via `sh -c`, output streamed to log
 4. **Completed or Failed** — exit code checked

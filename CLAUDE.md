@@ -56,10 +56,8 @@ All state and config lives in `.orc/` in the current working directory:
 │   ├── scheduled.json   # scheduled tasks
 │   ├── completed.json   # completed tasks
 │   ├── failed.json      # failed + cancelled tasks
-│   └── inbox/           # prompt files dropped by orc-add for subtask creation
+│   └── inbox/           # prompt files dropped by agents to create subtasks
 ├── orc.pid              # pid file, exists only while orchestrator is running
-├── bin/
-│   └── orc-add          # helper script for agents to create subtasks
 ├── logs/
 │   ├── orc-YYYY-MM-DD.log    # daily orchestrator log
 │   └── task-<id>.log         # per-task log
@@ -79,7 +77,7 @@ All state and config lives in `.orc/` in the current working directory:
 - **All JSON.** Config, job files, status files, reports — everything is JSON.
 - **Tasks stored in separate files by status.** `jobs/todo.json`, `jobs/scheduled.json`, `jobs/completed.json`, `jobs/failed.json`. `state.Store` uses `sync.Mutex` for concurrent updates. All writes are atomic (tmp+rename).
 - **Agent command is configurable.** Set `defaults.command` in config. The `$prompt` placeholder is replaced with the task prompt. No default — must be configured.
-- **Tasks can create subtasks.** Orc instructions are appended to every prompt telling agents how to use `.orc/bin/orc-add "prompt"`. The script drops a prompt file into `jobs/inbox/` which the orchestrator picks up.
+- **Tasks can create subtasks.** Orc instructions are appended to every prompt telling agents to write a prompt file into `jobs/inbox/` which the orchestrator picks up.
 - **Scheduled tasks stay in the task list.** After completing, the orchestrator resets them to pending when the next scheduled time arrives.
 - **TUI uses bubbletea with alt screen.** Refreshes every 1s via tick, receives events from orchestrator via channel.
 
@@ -122,7 +120,7 @@ Using silo with GitHub Copilot:
 
 ## Task Lifecycle
 
-1. Task created (status: `pending`) — via `orc add` or `orc-add`
+1. Task created (status: `pending`) — via `orc add` or by writing to `jobs/inbox/`
 2. Orchestrator picks it up when a slot is available (status: `running`)
 3. Agent command runs, stdout streamed to log
 4. On completion, task marked `completed` or `failed`

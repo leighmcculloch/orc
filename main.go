@@ -22,11 +22,8 @@ import (
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "orc",
-		Short: "AI Agent Orchestrator",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runOrchestrator()
-		},
+		Use:           "orc",
+		Short:         "AI Agent Orchestrator",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

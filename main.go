@@ -32,12 +32,26 @@ func main() {
 		SilenceErrors: true,
 	}
 
-	rootCmd.AddCommand(runCmd())
-	rootCmd.AddCommand(addCmd())
-	rootCmd.AddCommand(listCmd())
-	rootCmd.AddCommand(removeCmd())
-	rootCmd.AddCommand(reportCmd())
-	rootCmd.AddCommand(logCmd())
+	rootCmd.AddGroup(
+		&cobra.Group{ID: "orchestrator", Title: "Orchestrator:"},
+		&cobra.Group{ID: "tasks", Title: "Tasks:"},
+	)
+
+	run := runCmd()
+	run.GroupID = "orchestrator"
+	log := logCmd()
+	log.GroupID = "orchestrator"
+
+	add := addCmd()
+	add.GroupID = "tasks"
+	ls := listCmd()
+	ls.GroupID = "tasks"
+	rm := removeCmd()
+	rm.GroupID = "tasks"
+	rpt := reportCmd()
+	rpt.GroupID = "tasks"
+
+	rootCmd.AddCommand(run, log, add, ls, rm, rpt)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

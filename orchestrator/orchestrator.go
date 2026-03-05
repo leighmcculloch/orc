@@ -335,13 +335,19 @@ func (o *Orchestrator) handleAddTask(payload json.RawMessage) ipc.Response {
 	o.logger.Log("task added: %s (%s)", task.ID, task.Prompt)
 	o.emit(Event{Type: EventTaskAdded, TaskID: task.ID, Message: task.Prompt})
 
-	data, _ := json.Marshal(task)
+	data, err := json.Marshal(task)
+	if err != nil {
+		return ipc.Response{OK: false, Error: fmt.Sprintf("marshaling task: %v", err)}
+	}
 	return ipc.Response{OK: true, Payload: data}
 }
 
 func (o *Orchestrator) handleListTasks() ipc.Response {
 	tasks := o.store.AllTasks()
-	data, _ := json.Marshal(tasks)
+	data, err := json.Marshal(tasks)
+	if err != nil {
+		return ipc.Response{OK: false, Error: fmt.Sprintf("marshaling tasks: %v", err)}
+	}
 	return ipc.Response{OK: true, Payload: data}
 }
 
@@ -376,6 +382,9 @@ func (o *Orchestrator) handleGetStatus() ipc.Response {
 		Failed:    len(o.store.TasksByStatus(state.TaskFailed)),
 		Tasks:     o.store.AllTasks(),
 	}
-	data, _ := json.Marshal(status)
+	data, err := json.Marshal(status)
+	if err != nil {
+		return ipc.Response{OK: false, Error: fmt.Sprintf("marshaling status: %v", err)}
+	}
 	return ipc.Response{OK: true, Payload: data}
 }

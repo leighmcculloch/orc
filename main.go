@@ -168,7 +168,11 @@ func cmdAdd(args []string) {
 
 	// If orc is running, send via inbox file
 	if ipc.IsRunning() {
-		data, _ := json.Marshal(payload)
+		data, err := json.Marshal(payload)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 		resp, err := ipc.SendCommand(ipc.Request{
 			Command: ipc.CmdAddTask,
 			Payload: data,
@@ -287,7 +291,11 @@ func cmdRemove(args []string) {
 
 	if ipc.IsRunning() {
 		payload := ipc.RemoveTaskPayload{TaskID: taskID}
-		data, _ := json.Marshal(payload)
+		data, err := json.Marshal(payload)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 		resp, err := ipc.SendCommand(ipc.Request{
 			Command: ipc.CmdRemoveTask,
 			Payload: data,

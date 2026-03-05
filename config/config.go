@@ -34,7 +34,7 @@ func DefaultConfig() Config {
 		},
 		Defaults: Defaults{
 			Environment:   "default",
-			MaxConcurrent: 3,
+			MaxConcurrent: 1,
 		},
 	}
 }
@@ -79,7 +79,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("parsing config: %w", err)
 	}
 	if cfg.Defaults.MaxConcurrent == 0 {
-		cfg.Defaults.MaxConcurrent = 3
+		cfg.Defaults.MaxConcurrent = 1
 	}
 	if cfg.Environments == nil {
 		cfg.Environments = make(map[string]Environment)

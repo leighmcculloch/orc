@@ -174,7 +174,7 @@ Orc stores all configuration and state in a `.orc/` directory in the current wor
   },
   "defaults": {
     "environment": "default",
-    "max_concurrent": 1,
+    "max_concurrent": 3,
     "command": "claude -p \"$prompt\" --dangerously-skip-permissions"
   }
 }
@@ -186,7 +186,7 @@ Orc stores all configuration and state in a `.orc/` directory in the current wor
 |-------|-------------|---------|
 | `defaults.command` | Shell command to run for each task. `$prompt` is replaced with the task prompt. **Required.** | *(none)* |
 | `defaults.environment` | Default environment for new tasks | `"default"` |
-| `defaults.max_concurrent` | Max agents running in parallel | `1` |
+| `defaults.max_concurrent` | Max agents running in parallel | `3` |
 
 The `command` is run via `sh -c` with `$prompt` replaced by the task prompt.
 

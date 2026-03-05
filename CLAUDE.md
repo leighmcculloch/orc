@@ -95,7 +95,7 @@ All state and config lives in `.orc/` in the current working directory:
   },
   "defaults": {
     "environment": "default",
-    "max_concurrent": 1,
+    "max_concurrent": 3,
     "command": "claude -p \"$prompt\" --dangerously-skip-permissions"
   }
 }

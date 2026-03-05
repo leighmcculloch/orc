@@ -74,17 +74,21 @@ Tasks queued while orc is stopped will be picked up the next time `orc run` star
 
 ## Commands
 
+**Orchestrator:**
+
 | Command | Description |
 |---------|-------------|
 | `orc run` | Start the orchestrator with live TUI dashboard |
-| `orc add <prompt>` | Add an ad-hoc task |
-| `orc list` | List all tasks |
-| `orc remove <id>` | Remove a task |
-| `orc status` | Show orchestrator status (running/pending/completed counts) |
 | `orc log` | View today's logs |
-| `orc report` | View today's completed task reports |
-| `orc init` | Initialize `.orc/` directory with default config |
-| `orc help` | Show usage information |
+
+**Tasks:**
+
+| Command | Description |
+|---------|-------------|
+| `orc add <prompt>` | Add a task |
+| `orc ls` | List all tasks |
+| `orc rm <id>` | Remove a task |
+| `orc report` | View completed task reports |
 
 ### Adding Tasks
 

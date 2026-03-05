@@ -11,31 +11,17 @@ import (
 )
 
 type Config struct {
-	Environments map[string]Environment `json:"environments"`
-	Defaults     Defaults               `json:"defaults"`
-}
-
-type Environment struct {
-	Name    string `json:"name"`
-	WorkDir string `json:"work_dir"`
+	Defaults Defaults `json:"defaults"`
 }
 
 type Defaults struct {
-	Environment   string `json:"environment"`
 	MaxConcurrent int    `json:"max_concurrent"`
 	Command       string `json:"command"`
 }
 
 func DefaultConfig() Config {
 	return Config{
-		Environments: map[string]Environment{
-			"default": {
-				Name:    "default",
-				WorkDir: ".",
-			},
-		},
 		Defaults: Defaults{
-			Environment:   "default",
 			MaxConcurrent: 3,
 		},
 	}
@@ -81,9 +67,6 @@ func Load() (Config, error) {
 	}
 	if cfg.Defaults.MaxConcurrent == 0 {
 		cfg.Defaults.MaxConcurrent = 3
-	}
-	if cfg.Environments == nil {
-		cfg.Environments = make(map[string]Environment)
 	}
 	return cfg, nil
 }

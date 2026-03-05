@@ -26,12 +26,7 @@ type Result struct {
 	Error    error
 }
 
-func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, envName string, logFn func(string, ...any)) Result {
-	env, ok := cfg.Environments[envName]
-	if !ok {
-		return Result{ExitCode: 1, Error: fmt.Errorf("environment %q not found in %s", envName, config.ConfigPath())}
-	}
-
+func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, logFn func(string, ...any)) Result {
 	workDir := filepath.Join(config.OrcDir(), "workdirs", taskID)
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		return Result{ExitCode: 1, Error: fmt.Errorf("creating work dir: %w", err)}
@@ -49,12 +44,6 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 		Status:    "running",
 		UpdatedAt: time.Now(),
 	})
-
-	// Run agent command
-	runDir := env.WorkDir
-	if runDir == "" || runDir == "." {
-		runDir, _ = os.Getwd()
-	}
 
 	agentCmd := cfg.Defaults.Command
 	if agentCmd == "" {
@@ -83,7 +72,7 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 	defer logFile.Close()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", shellCmd)
-	cmd.Dir = runDir
+	cmd.Dir = workDir
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

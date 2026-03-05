@@ -25,11 +25,8 @@ Orc is a terminal app that manages a fleet of AI coding agent processes — brin
 # Install
 go install github.com/leighmcculloch/orc@latest
 
-# Initialize
-cd your-project
-orc init
-
 # Add a task
+cd your-project
 orc add "Refactor the auth module to use JWT tokens"
 
 # Start the orchestrator
@@ -49,7 +46,7 @@ Orc solves this by giving you:
 - **A live dashboard** — see what's running, what's pending, and what's done
 - **Reports** — every completed task produces a summary, catalogued by date
 - **Logs** — full output capture per task, viewable anytime or streamed live
-- **Environments** — named configs with working directories for different projects
+- **Isolated workdirs** — each agent runs in its own directory under `.orc/workdirs/`
 
 ## How It Works
 
@@ -96,14 +93,11 @@ Tasks queued while orc is stopped will be picked up the next time `orc run` star
 # Simple ad-hoc task
 orc add "Write unit tests for the user service"
 
-# Task with a specific environment
-orc add -e myproject "Run the linter and fix all warnings"
-
 # Scheduled task
 orc add -s "daily 09:00" "Review open pull requests and summarize"
 
-# Scheduled task with environment
-orc add -e backend -s "every 1h" "Check for API errors in the logs"
+# Scheduled task
+orc add -s "every 1h" "Check for API errors in the logs"
 ```
 
 ### Viewing Logs
@@ -158,7 +152,7 @@ go build -o orc .
 
 ## Configuration
 
-Orc stores all configuration and state in a `.orc/` directory in the current working directory. Run `orc init` to create it with defaults.
+Orc stores all configuration and state in a `.orc/` directory in the current working directory.
 
 ### Configuration File
 
@@ -166,14 +160,7 @@ Orc stores all configuration and state in a `.orc/` directory in the current wor
 
 ```json
 {
-  "environments": {
-    "default": {
-      "name": "default",
-      "work_dir": "."
-    }
-  },
   "defaults": {
-    "environment": "default",
     "max_concurrent": 3,
     "command": "claude -p \"$prompt\" --dangerously-skip-permissions"
   }
@@ -185,10 +172,9 @@ Orc stores all configuration and state in a `.orc/` directory in the current wor
 | Field | Description | Default |
 |-------|-------------|---------|
 | `defaults.command` | Shell command to run for each task. `$prompt` is replaced with the task prompt. **Required.** | *(none)* |
-| `defaults.environment` | Default environment for new tasks | `"default"` |
 | `defaults.max_concurrent` | Max agents running in parallel | `3` |
 
-The `command` is run via `sh -c` with `$prompt` replaced by the task prompt.
+The `command` is run via `sh -c` with `$prompt` replaced by the task prompt. Each agent runs in its own isolated directory at `.orc/workdirs/<task-id>/`.
 
 ### Command Examples
 
@@ -205,34 +191,6 @@ Using [silo](https://github.com/leighmcculloch/silo) for container isolation wit
 Using silo with GitHub Copilot:
 ```json
 "command": "silo copilot -v -- --model claude-opus-4.6 --allow-all-tools -p \"$prompt\""
-```
-
-### Environments
-
-Environments let you define named configurations for different projects or contexts. Each environment has a name and a working directory.
-
-| Field | Description |
-|-------|-------------|
-| `name` | Environment name (must match the key) |
-| `work_dir` | Working directory for the agent (where it runs) |
-
-```json
-{
-  "environments": {
-    "default": {
-      "name": "default",
-      "work_dir": "."
-    },
-    "backend": {
-      "name": "backend",
-      "work_dir": "/home/user/projects/backend"
-    },
-    "infra": {
-      "name": "infra",
-      "work_dir": "/home/user/projects/infrastructure"
-    }
-  }
-}
 ```
 
 ## .orc/ Directory Layout
@@ -381,41 +339,7 @@ Press `q` or `Ctrl+C` to shut down the orchestrator.
 ### Minimal Usage
 
 ```bash
-orc init
 orc add "Fix the broken tests in the auth module"
-orc run
-```
-
-### Multi-Environment Setup
-
-```json
-{
-  "environments": {
-    "default": {
-      "name": "default",
-      "work_dir": "."
-    },
-    "frontend": {
-      "name": "frontend",
-      "work_dir": "/home/user/app/frontend"
-    },
-    "backend": {
-      "name": "backend",
-      "work_dir": "/home/user/app/backend"
-    }
-  },
-  "defaults": {
-    "environment": "default",
-    "max_concurrent": 2,
-    "command": "claude -p \"$prompt\" --dangerously-skip-permissions"
-  }
-}
-```
-
-```bash
-orc add -e frontend "Add dark mode toggle to the settings page"
-orc add -e backend "Add rate limiting middleware to the API"
-orc add -e frontend "Write Cypress tests for the login flow"
 orc run
 ```
 
@@ -423,7 +347,7 @@ orc run
 
 ```bash
 # Morning code review
-orc add -s "daily 09:00" -e backend "Review open PRs and write summary comments"
+orc add -s "daily 09:00" "Review open PRs and write summary comments"
 
 # Hourly health check
 orc add -s "every 1h" "Check application logs for errors and report anomalies"
@@ -463,8 +387,7 @@ In another terminal:
 # These write directly to the shared job files
 orc add "Migrate the user table to add email verification column"
 orc add "Write API documentation for the payments endpoint"
-orc list
-orc status
+orc ls
 ```
 
 ### Queuing Tasks Before Starting Orc

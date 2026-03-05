@@ -131,7 +131,6 @@ func addCmd() *cobra.Command {
 		Short: "Add a task",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			env, _ := cmd.Flags().GetString("env")
 			schedule, _ := cmd.Flags().GetString("schedule")
 
 			prompt := strings.Join(args, " ")
@@ -145,22 +144,11 @@ func addCmd() *cobra.Command {
 				return err
 			}
 
-			cfg, err := config.Load()
-			if err != nil {
-				return err
-			}
-
-			taskEnv := env
-			if taskEnv == "" {
-				taskEnv = cfg.Defaults.Environment
-			}
-
 			task := state.Task{
-				Prompt:      prompt,
-				Environment: taskEnv,
-				Schedule:    schedule,
-				Status:      state.TaskPending,
-				CreatedAt:   time.Now(),
+				Prompt:    prompt,
+				Schedule:  schedule,
+				Status:    state.TaskPending,
+				CreatedAt: time.Now(),
 			}
 
 			task, err = store.AddTask(task)
@@ -172,7 +160,6 @@ func addCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringP("env", "e", "", "environment name")
 	cmd.Flags().StringP("schedule", "s", "", `schedule expression (e.g. "every 5m", "daily 09:00")`)
 	return cmd
 }
@@ -199,14 +186,14 @@ func printTasks(tasks []state.Task) {
 		fmt.Println("No tasks.")
 		return
 	}
-	fmt.Printf("%-10s %-12s %-15s %-10s %s\n", "ID", "STATUS", "ENVIRONMENT", "SCHEDULE", "PROMPT")
-	fmt.Println(strings.Repeat("-", 80))
+	fmt.Printf("%-10s %-12s %-10s %s\n", "ID", "STATUS", "SCHEDULE", "PROMPT")
+	fmt.Println(strings.Repeat("-", 70))
 	for _, t := range tasks {
 		sched := t.Schedule
 		if sched == "" {
 			sched = "-"
 		}
-		fmt.Printf("%-10s %-12s %-15s %-10s %s\n", t.ID, t.Status, t.Environment, sched, config.Truncate(t.Prompt, 40))
+		fmt.Printf("%-10s %-12s %-10s %s\n", t.ID, t.Status, sched, config.Truncate(t.Prompt, 40))
 	}
 }
 

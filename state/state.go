@@ -23,17 +23,15 @@ const (
 )
 
 type Task struct {
-	ID          string     `json:"id"`
-	Prompt      string     `json:"prompt"`
-	Environment string     `json:"environment"`
-	Schedule    string     `json:"schedule,omitempty"`
-	Status      TaskStatus `json:"status"`
-	CreatedAt   time.Time  `json:"created_at"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	FinishedAt  *time.Time `json:"finished_at,omitempty"`
-	Error       string     `json:"error,omitempty"`
-	WorkDir     string     `json:"work_dir,omitempty"`
-	PID         int        `json:"pid,omitempty"`
+	ID         string     `json:"id"`
+	Prompt     string     `json:"prompt"`
+	Schedule   string     `json:"schedule,omitempty"`
+	Status     TaskStatus `json:"status"`
+	CreatedAt  time.Time  `json:"created_at"`
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	Error      string     `json:"error,omitempty"`
+	PID        int        `json:"pid,omitempty"`
 }
 
 type meta struct {

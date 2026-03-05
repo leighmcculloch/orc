@@ -16,15 +16,11 @@ go build -o orc .
 ```
 orc run                                   Start orchestrator (foreground TUI)
 orc add <prompt>                          Add ad-hoc task
-orc add -e <env> <prompt>                 Add task with environment
 orc add -s <schedule> <prompt>            Add scheduled task
-orc add -e <env> -s <schedule> <prompt>   Both
-orc list | orc ls                         List all tasks
-orc remove <id> | orc rm <id>            Remove a task
-orc status                                Show running/pending/completed counts
+orc ls                                    List all tasks
+orc rm <id>                               Remove a task
 orc log [-d YYYY-MM-DD] [-f] [-t <id>]   View/stream logs
 orc report [today|yesterday|YYYY-MM-DD]   View completed task reports
-orc init                                  Initialize .orc/ directory
 ```
 
 ## Architecture
@@ -49,7 +45,7 @@ All state and config lives in `.orc/` in the current working directory:
 
 ```
 .orc/
-├── config.jsonc          # environments, defaults (max_concurrent, command)
+├── config.jsonc          # defaults (max_concurrent, command)
 ├── jobs/
 │   ├── meta.json        # next task ID counter
 │   ├── todo.json        # pending + running tasks
@@ -85,38 +81,14 @@ All state and config lives in `.orc/` in the current working directory:
 
 ```json
 {
-  "environments": {
-    "default": {
-      "name": "default",
-      "work_dir": "."
-    }
-  },
   "defaults": {
-    "environment": "default",
     "max_concurrent": 3,
     "command": "claude -p \"$prompt\" --dangerously-skip-permissions"
   }
 }
 ```
 
-The `command` is run via `sh -c` with `$prompt` replaced by the task prompt. This field is required — orc will error if it is not set.
-
-### Examples
-
-Using Claude Code directly:
-```json
-"command": "claude -p \"$prompt\" --dangerously-skip-permissions"
-```
-
-Using [silo](https://github.com/leighmcculloch/silo) for container isolation:
-```json
-"command": "silo claude -v -- -p \"$prompt\" --dangerously-skip-permissions"
-```
-
-Using silo with GitHub Copilot:
-```json
-"command": "silo copilot -v -- --model claude-opus-4.6 --allow-all-tools -p \"$prompt\""
-```
+The `command` is run via `sh -c` with `$prompt` replaced by the task prompt. This field is required — orc will error if it is not set. Each agent runs in its own isolated directory at `.orc/workdirs/<task-id>/`.
 
 ## Task Lifecycle
 

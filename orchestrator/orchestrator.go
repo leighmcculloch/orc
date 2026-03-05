@@ -201,12 +201,7 @@ func (o *Orchestrator) startTask(task state.Task) {
 			o.mu.Unlock()
 		}()
 
-		env := task.Environment
-		if env == "" {
-			env = o.cfg.Defaults.Environment
-		}
-
-		result := agent.Run(o.ctx, o.cfg, task.ID, task.Prompt, env, func(format string, args ...any) {
+		result := agent.Run(o.ctx, o.cfg, task.ID, task.Prompt, func(format string, args ...any) {
 			o.logger.TaskLog(task.ID, format, args...)
 		})
 
@@ -274,12 +269,10 @@ func (o *Orchestrator) pollJobInbox() {
 			continue
 		}
 
-		env := o.cfg.Defaults.Environment
 		task := state.Task{
-			Prompt:      prompt,
-			Environment: env,
-			Status:      state.TaskPending,
-			CreatedAt:   time.Now(),
+			Prompt:    prompt,
+			Status:    state.TaskPending,
+			CreatedAt: time.Now(),
 		}
 		task, err = o.store.AddTask(task)
 		if err != nil {

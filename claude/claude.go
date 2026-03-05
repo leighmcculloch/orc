@@ -92,7 +92,17 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 
 	// Append orc instructions to the prompt
 	fullPrompt := prompt + "\n\n" + orcInstructions()
-	shellCmd := strings.Replace(agentCmd, "$prompt", fullPrompt, 1)
+
+	// Write prompt to a file so it can be safely passed to the shell command
+	// without shell escaping issues. The agent command template uses $prompt
+	// which we replace with a shell-safe reference to the file.
+	promptPath := filepath.Join(workDir, "prompt.txt")
+	if err := os.WriteFile(promptPath, []byte(fullPrompt), 0644); err != nil {
+		return Result{ExitCode: 1, Error: fmt.Errorf("writing prompt file: %w", err)}
+	}
+
+	// Replace $prompt with a shell command that reads the prompt file
+	shellCmd := strings.Replace(agentCmd, "$prompt", "$(cat "+shellQuote(promptPath)+")", 1)
 
 	// Capture output to log file
 	logPath := filepath.Join(workDir, "output.log")
@@ -189,7 +199,14 @@ func WriteOrcAddScript() error {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		return err
 	}
-	script := `#!/bin/sh
+
+	// Resolve absolute path to inbox so the script works from any working directory
+	absInbox, err := filepath.Abs(filepath.Join(config.OrcDir(), "inbox"))
+	if err != nil {
+		return fmt.Errorf("resolving inbox path: %w", err)
+	}
+
+	script := fmt.Sprintf(`#!/bin/sh
 set -e
 prompt="$*"
 if [ -z "$prompt" ]; then
@@ -197,10 +214,10 @@ if [ -z "$prompt" ]; then
   exit 1
 fi
 id=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')
-inbox=".orc/inbox"
+inbox=%s
 mkdir -p "$inbox"
 # Escape JSON special characters in prompt
-escaped=$(printf '%s' "$prompt" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g' | awk '{if(NR>1) printf "\\n"; printf "%s",$0}')
+escaped=$(printf '%%s' "$prompt" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g' | awk '{if(NR>1) printf "\\n"; printf "%%s",$0}')
 tmp="$inbox/$id.json.tmp"
 cat > "$tmp" <<JSONEOF
 {
@@ -211,7 +228,7 @@ cat > "$tmp" <<JSONEOF
 JSONEOF
 mv "$tmp" "$inbox/$id.json"
 echo "task submitted: $id"
-`
+`, shellQuote(absInbox))
 	scriptPath := filepath.Join(binDir, "orc-add")
 	return os.WriteFile(scriptPath, []byte(script), 0755)
 }
@@ -219,6 +236,10 @@ echo "task submitted: $id"
 func writeStatus(workDir string, status ProcessStatus) {
 	data, _ := json.MarshalIndent(status, "", "  ")
 	os.WriteFile(filepath.Join(workDir, "status.json"), data, 0644)
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 func truncate(s string, n int) string {

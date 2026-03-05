@@ -76,6 +76,10 @@ type model struct {
 	viewTaskID   string
 	outputLines  []string
 	outputScroll int
+
+	// Quit confirmation
+	confirmQuit   bool
+	confirmQuitAt time.Time
 }
 
 type tickMsg time.Time
@@ -122,6 +126,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case tickMsg:
+		if m.confirmQuit && time.Since(m.confirmQuitAt) > 3*time.Second {
+			m.confirmQuit = false
+		}
 		m.refreshTaskList()
 		if m.mode == viewTaskOutput {
 			m.loadOutput()
@@ -154,9 +161,13 @@ func (m *model) refreshTaskList() {
 func (m model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
-		m.quitting = true
-		m.orc.Stop()
-		return m, tea.Quit
+		if m.confirmQuit {
+			m.quitting = true
+			m.orc.Stop()
+			return m, tea.Quit
+		}
+		m.confirmQuit = true
+		m.confirmQuitAt = time.Now()
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
@@ -184,9 +195,13 @@ func (m model) updateTaskOutput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.viewTaskID = ""
 		m.outputLines = nil
 	case "ctrl+c":
-		m.quitting = true
-		m.orc.Stop()
-		return m, tea.Quit
+		if m.confirmQuit {
+			m.quitting = true
+			m.orc.Stop()
+			return m, tea.Quit
+		}
+		m.confirmQuit = true
+		m.confirmQuitAt = time.Now()
 	case "up", "k":
 		if m.outputScroll > 0 {
 			m.outputScroll--
@@ -359,7 +374,11 @@ func (m model) viewDashboardScreen() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(dimStyle.Render("↑/↓ navigate • enter view output • q quit"))
+	if m.confirmQuit {
+		b.WriteString(failedStyle.Render("Press q or ctrl+c again to quit"))
+	} else {
+		b.WriteString(dimStyle.Render("↑/↓ navigate • enter view output • q quit"))
+	}
 	b.WriteString("\n")
 
 	return b.String()
@@ -419,7 +438,11 @@ func (m model) viewTaskOutputScreen() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(dimStyle.Render("↑/↓ scroll • g top • G bottom • q back"))
+	if m.confirmQuit {
+		b.WriteString(failedStyle.Render("Press ctrl+c again to quit"))
+	} else {
+		b.WriteString(dimStyle.Render("↑/↓ scroll • g top • G bottom • q back"))
+	}
 	b.WriteString("\n")
 
 	return b.String()

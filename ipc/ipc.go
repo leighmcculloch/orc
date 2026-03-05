@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/leighmcculloch/orc/config"
@@ -64,10 +65,29 @@ func EnsureIPCDirs() error {
 	return nil
 }
 
-// IsRunning checks if orc is running by looking for a pid file.
+// IsRunning checks if orc is running by reading the pid file and verifying
+// the process is alive. Removes stale pid files.
 func IsRunning() bool {
-	_, err := os.Stat(PidPath())
-	return err == nil
+	data, err := os.ReadFile(PidPath())
+	if err != nil {
+		return false
+	}
+	var pid int
+	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil {
+		os.Remove(PidPath())
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		os.Remove(PidPath())
+		return false
+	}
+	// Signal 0 checks if process exists without actually sending a signal
+	if err := proc.Signal(syscall.Signal(0)); err != nil {
+		os.Remove(PidPath())
+		return false
+	}
+	return true
 }
 
 // WritePid writes the current process pid to the pid file.

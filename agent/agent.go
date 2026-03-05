@@ -64,7 +64,7 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, e
 
 	agentCmd := cfg.Defaults.AgentCommand
 	if agentCmd == "" {
-		agentCmd = config.DefaultAgentCommand
+		return Result{ExitCode: 1, Error: fmt.Errorf("agent_command not set in config; set defaults.agent_command in %s", config.ConfigPath())}
 	}
 
 	// Append orc instructions to the prompt

@@ -11,13 +11,13 @@ Orchestrate a fleet of Claude Code agents from your terminal.
  ╚═════╝ ╚═╝  ╚═╝ ╚═════╝
 ```
 
-Orc is a terminal app that manages a fleet of Claude Code processes — bringing them up and pulling them down as needed. Tasks can run on a schedule or be added ad-hoc. Orc runs in the foreground with a live TUI dashboard, while other `orc` processes can add, list, and remove tasks via file-based IPC.
+Orc is a terminal app that manages a fleet of AI coding agent processes — bringing them up and pulling them down as needed. Tasks can run on a schedule or be added ad-hoc. Orc runs in the foreground with a live TUI dashboard, while other `orc` processes can add, list, and remove tasks via file-based IPC.
 
 > [!NOTE]
 > Built using AI. This is an experimental tool. Use at your own risk.
 
 > [!WARNING]
-> Orc runs Claude Code with `--dangerously-skip-permissions`. This means Claude Code agents will execute commands, write files, and make changes **without asking for confirmation**. Only run orc in environments where you are comfortable with fully autonomous agent operation.
+> Orc runs agents autonomously. Depending on your configured `agent_command`, agents may execute commands, write files, and make changes **without asking for confirmation**. Only run orc in environments where you are comfortable with fully autonomous agent operation.
 
 ## Quick Start
 
@@ -49,7 +49,7 @@ Orc solves this by giving you:
 - **A live dashboard** — see what's running, what's pending, and what's done
 - **Reports** — every completed task produces a summary, catalogued by date
 - **Logs** — full output capture per task, viewable anytime or streamed live
-- **Environments** — named configs with working directories and pre-run hooks
+- **Environments** — named configs with working directories for different projects
 
 ## How It Works
 
@@ -65,9 +65,9 @@ Orc runs as a **foreground process** with a TUI. It is not a daemon. While it's 
 │  manages agents      │       └──────────────────  ┘
 └──────────────────────┘
          │
-         ├── claude --print "task 1"
-         ├── claude --print "task 2"
-         └── claude --print "task 3"
+         ├── agent_command "task 1"
+         ├── agent_command "task 2"
+         └── agent_command "task 3"
 ```
 
 When orc is not running, commands like `orc add` and `orc list` fall back to reading and writing the state file directly. Tasks queued while orc is stopped will be picked up the next time `orc run` starts.
@@ -151,7 +151,7 @@ go build -o orc .
 ### Prerequisites
 
 - **Go 1.24+**: To build/install orc
-- **Claude Code CLI**: The `claude` command must be available in `$PATH` (or configured via `claude_code_path` in config)
+- **An AI coding agent CLI**: Configure via `agent_command` in `.orc/config.json` (see [Configuration](#configuration))
 
 ## Configuration
 
@@ -166,14 +166,13 @@ Orc stores all configuration and state in a `.orc/` directory in the current wor
   "environments": {
     "default": {
       "name": "default",
-      "work_dir": ".",
-      "pre_hooks": []
+      "work_dir": "."
     }
   },
   "defaults": {
     "environment": "default",
     "max_concurrent": 3,
-    "claude_code_path": "claude"
+    "agent_command": "claude -p \"$prompt\" --dangerously-skip-permissions"
   }
 }
 ```
@@ -182,56 +181,56 @@ Orc stores all configuration and state in a `.orc/` directory in the current wor
 
 | Field | Description | Default |
 |-------|-------------|---------|
+| `defaults.agent_command` | Shell command to run for each task. `$prompt` is replaced with the task prompt. **Required.** | *(none)* |
 | `defaults.environment` | Default environment for new tasks | `"default"` |
-| `defaults.max_concurrent` | Max Claude Code agents running in parallel | `3` |
-| `defaults.claude_code_path` | Path to the Claude Code CLI binary | `"claude"` |
+| `defaults.max_concurrent` | Max agents running in parallel | `3` |
+
+The `agent_command` is run via `sh -c` with `$prompt` replaced by the task prompt.
+
+### Agent Command Examples
+
+Using Claude Code directly:
+```json
+"agent_command": "claude -p \"$prompt\" --dangerously-skip-permissions"
+```
+
+Using [silo](https://github.com/leighmcculloch/silo) for container isolation with Claude Code:
+```json
+"agent_command": "silo claude -v -- -p \"$prompt\" --dangerously-skip-permissions"
+```
+
+Using silo with GitHub Copilot:
+```json
+"agent_command": "silo copilot -v -- --model claude-opus-4.6 --allow-all-tools -p \"$prompt\""
+```
 
 ### Environments
 
-Environments let you define named configurations for different projects or contexts. Each environment has a working directory and optional pre-run hooks.
+Environments let you define named configurations for different projects or contexts. Each environment has a name and a working directory.
 
 | Field | Description |
 |-------|-------------|
 | `name` | Environment name (must match the key) |
-| `work_dir` | Working directory for Claude Code (where it runs) |
-| `pre_hooks` | Shell commands to run before Claude Code starts |
+| `work_dir` | Working directory for the agent (where it runs) |
 
 ```json
 {
   "environments": {
     "default": {
       "name": "default",
-      "work_dir": ".",
-      "pre_hooks": []
+      "work_dir": "."
     },
     "backend": {
       "name": "backend",
-      "work_dir": "/home/user/projects/backend",
-      "pre_hooks": [
-        "git pull origin main",
-        "npm install"
-      ]
+      "work_dir": "/home/user/projects/backend"
     },
     "infra": {
       "name": "infra",
-      "work_dir": "/home/user/projects/infrastructure",
-      "pre_hooks": [
-        "terraform init"
-      ]
+      "work_dir": "/home/user/projects/infrastructure"
     }
   }
 }
 ```
-
-### Pre-run Hooks
-
-Pre-hooks run sequentially in the environment's `work_dir` before Claude Code starts. If any hook fails, the task fails without starting Claude Code.
-
-Use hooks for:
-- Pulling latest changes (`git pull`)
-- Installing dependencies (`npm install`, `go mod tidy`)
-- Setting up the environment (`source .env`, `terraform init`)
-- Running pre-flight checks
 
 ## .orc/ Directory Layout
 
@@ -246,10 +245,10 @@ Use hooks for:
 │   ├── orc-2025-03-15.log     Daily orchestrator log
 │   └── task-abc123de.log      Per-task log
 ├── workdirs/
-│   └── abc123de/
+│   └── <task-id>/
 │       ├── status.json         Live process status
-│       ├── output.log          Full Claude Code stdout/stderr
-│       └── report.md           Summary report (written by Claude)
+│       ├── output.log          Full agent stdout/stderr
+│       └── prompt.txt          Prompt sent to the agent
 └── reports/
     └── 2025-03-15.json         Daily catalogue of completed tasks
 ```
@@ -264,9 +263,9 @@ Each task gets its own directory at `.orc/workdirs/<task-id>/` containing:
 
 | File | Description |
 |------|-------------|
-| `status.json` | Live status updated by the Claude Code runner (starting, running_hook, running, completed, failed) |
-| `output.log` | Full captured stdout/stderr from Claude Code |
-| `report.md` | Summary report — Claude Code is instructed to write this on completion |
+| `status.json` | Live status updated by the agent runner (starting, running, completed, failed) |
+| `output.log` | Full captured stdout/stderr from the agent |
+| `prompt.txt` | The prompt sent to the agent |
 
 ### Daily Reports
 
@@ -277,9 +276,8 @@ When a task completes, it's recorded in `.orc/reports/YYYY-MM-DD.json`:
   "date": "2025-03-15",
   "entries": [
     {
-      "task_id": "abc123de",
+      "task_id": "1",
       "prompt": "Refactor auth module to use JWT",
-      "report": "Refactored the auth module to use JWT tokens...",
       "status": "completed",
       "finished_at": "2025-03-15T14:30:00Z"
     }
@@ -296,7 +294,7 @@ When a task completes, it's recorded in `.orc/reports/YYYY-MM-DD.json`:
                      │ slot available
                      ▼
               ┌──────────────┐
-              │   running    │ pre-hooks → claude --print
+              │   running    │ agent_command
               └──┬───────┬───┘
                  │       │
           success│       │error/exit!=0
@@ -312,9 +310,8 @@ When a task completes, it's recorded in `.orc/reports/YYYY-MM-DD.json`:
 
 1. **Created** — task added via `orc add` or file-based IPC (status: `pending`)
 2. **Dispatched** — orchestrator picks it up when a concurrency slot opens (status: `running`)
-3. **Pre-hooks** — environment's `pre_hooks` execute in the `work_dir`
-4. **Claude Code runs** — `claude --print --output-format text "<prompt>"`, output streamed to log
-5. **Completed or Failed** — exit code checked, report.md read if present
+3. **Agent runs** — `agent_command` executed via `sh -c`, output streamed to log
+4. **Completed or Failed** — exit code checked
 6. **Catalogued** — entry added to daily report file
 7. **Re-scheduled** — for scheduled tasks, status resets to `pending` when the next run time arrives
 
@@ -323,9 +320,9 @@ When a task completes, it's recorded in `.orc/reports/YYYY-MM-DD.json`:
 | Status | Meaning |
 |--------|---------|
 | `pending` | Waiting to be picked up |
-| `running` | Claude Code is executing |
+| `running` | Agent is executing |
 | `completed` | Finished successfully |
-| `failed` | Exited with non-zero code or hook failure |
+| `failed` | Exited with non-zero code |
 | `cancelled` | Interrupted by orchestrator shutdown |
 
 ## Scheduling
@@ -401,24 +398,21 @@ orc run
   "environments": {
     "default": {
       "name": "default",
-      "work_dir": ".",
-      "pre_hooks": []
+      "work_dir": "."
     },
     "frontend": {
       "name": "frontend",
-      "work_dir": "/home/user/app/frontend",
-      "pre_hooks": ["npm install"]
+      "work_dir": "/home/user/app/frontend"
     },
     "backend": {
       "name": "backend",
-      "work_dir": "/home/user/app/backend",
-      "pre_hooks": ["go mod tidy"]
+      "work_dir": "/home/user/app/backend"
     }
   },
   "defaults": {
     "environment": "default",
     "max_concurrent": 2,
-    "claude_code_path": "claude"
+    "agent_command": "claude -p \"$prompt\" --dangerously-skip-permissions"
   }
 }
 ```

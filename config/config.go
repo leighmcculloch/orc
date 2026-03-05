@@ -23,8 +23,6 @@ type Defaults struct {
 	AgentCommand  string `json:"agent_command"`
 }
 
-const DefaultAgentCommand = `silo claude -- -p "$prompt"`
-
 func DefaultConfig() Config {
 	return Config{
 		Environments: map[string]Environment{
@@ -36,7 +34,6 @@ func DefaultConfig() Config {
 		Defaults: Defaults{
 			Environment:   "default",
 			MaxConcurrent: 3,
-			AgentCommand:  DefaultAgentCommand,
 		},
 	}
 }
@@ -82,9 +79,6 @@ func Load() (Config, error) {
 	}
 	if cfg.Defaults.MaxConcurrent == 0 {
 		cfg.Defaults.MaxConcurrent = 3
-	}
-	if cfg.Defaults.AgentCommand == "" {
-		cfg.Defaults.AgentCommand = DefaultAgentCommand
 	}
 	if cfg.Environments == nil {
 		cfg.Environments = make(map[string]Environment)

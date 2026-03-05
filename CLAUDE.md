@@ -76,7 +76,7 @@ All state and config lives in `.orc/` in the current working directory:
 - **pid file for liveness.** `.orc/orc.pid` is created on `orc run` and removed on shutdown. `ipc.IsRunning()` checks for this file.
 - **All JSON.** Config, state, IPC messages, status files, reports — everything is JSON.
 - **State file is mutex-protected.** `state.Store` uses `sync.Mutex` for concurrent task updates from goroutines. Writes are atomic (tmp+rename).
-- **Agent command is configurable.** Defaults to `silo claude -- -p "$prompt"`. The `$prompt` placeholder is replaced with the task prompt.
+- **Agent command is configurable.** Set `defaults.agent_command` in config. The `$prompt` placeholder is replaced with the task prompt. No default — must be configured.
 - **Tasks can create subtasks.** Orc instructions are appended to every prompt telling agents how to use `.orc/bin/orc-add "prompt"` to submit new tasks. The helper script writes IPC JSON to the inbox.
 - **Scheduled tasks stay in the task list.** After completing, the orchestrator resets them to pending when the next scheduled time arrives.
 - **TUI uses bubbletea with alt screen.** Refreshes every 1s via tick, receives events from orchestrator via channel.
@@ -89,28 +89,33 @@ All state and config lives in `.orc/` in the current working directory:
     "default": {
       "name": "default",
       "work_dir": "."
-    },
-    "myproject": {
-      "name": "myproject",
-      "work_dir": "/path/to/project"
     }
   },
   "defaults": {
     "environment": "default",
     "max_concurrent": 3,
-    "agent_command": "silo claude -- -p \"$prompt\""
+    "agent_command": "claude -p \"$prompt\" --dangerously-skip-permissions"
   }
 }
 ```
 
-The `agent_command` is run via `sh -c` with `$prompt` replaced by the task prompt. To use a different agent, change the command. For example, to use GitHub Copilot:
+The `agent_command` is run via `sh -c` with `$prompt` replaced by the task prompt. This field is required — orc will error if it is not set.
 
+### Examples
+
+Using Claude Code directly:
 ```json
-{
-  "defaults": {
-    "agent_command": "silo copilot -- -p \"$prompt\""
-  }
-}
+"agent_command": "claude -p \"$prompt\" --dangerously-skip-permissions"
+```
+
+Using [silo](https://github.com/leighmcculloch/silo) for container isolation:
+```json
+"agent_command": "silo claude -v -- -p \"$prompt\" --dangerously-skip-permissions"
+```
+
+Using silo with GitHub Copilot:
+```json
+"agent_command": "silo copilot -v -- --model claude-opus-4.6 --allow-all-tools -p \"$prompt\""
 ```
 
 ## Task Lifecycle

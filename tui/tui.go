@@ -19,8 +19,7 @@ import (
 var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("205")).
-			MarginBottom(1)
+			Foreground(lipgloss.Color("205"))
 
 	sectionStyle = lipgloss.NewStyle().
 			Bold(true).

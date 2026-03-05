@@ -265,8 +265,6 @@ func (m model) viewDashboardScreen() string {
 	b.WriteString(titleStyle.Render("orc"))
 	b.WriteString("\n")
 
-	m.refreshTaskList()
-
 	store := m.orc.Store()
 	tasks := store.AllTasks()
 

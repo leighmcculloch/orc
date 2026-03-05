@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/leighmcculloch/orc/claude"
+	"github.com/leighmcculloch/orc/agent"
 	"github.com/leighmcculloch/orc/config"
 	"github.com/leighmcculloch/orc/ipc"
 	"github.com/leighmcculloch/orc/logging"
@@ -221,7 +221,7 @@ func (o *Orchestrator) startTask(task state.Task) {
 			env = o.cfg.Defaults.Environment
 		}
 
-		result := claude.Run(o.ctx, o.cfg, task.ID, task.Prompt, env, func(format string, args ...any) {
+		result := agent.Run(o.ctx, o.cfg, task.ID, task.Prompt, env, func(format string, args ...any) {
 			o.logger.TaskLog(task.ID, format, args...)
 		})
 

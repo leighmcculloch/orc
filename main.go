@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/leighmcculloch/orc/claude"
+	"github.com/leighmcculloch/orc/agent"
 	"github.com/leighmcculloch/orc/config"
 	"github.com/leighmcculloch/orc/ipc"
 	"github.com/leighmcculloch/orc/logging"
@@ -503,7 +503,7 @@ func cmdInit() {
 	}
 
 	// Write orc-add helper script
-	if err := claude.WriteOrcAddScript(); err != nil {
+	if err := agent.WriteOrcAddScript(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}

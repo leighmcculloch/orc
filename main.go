@@ -182,7 +182,10 @@ func cmdAdd(args []string) {
 			os.Exit(1)
 		}
 		var task state.Task
-		json.Unmarshal(resp.Payload, &task)
+		if err := json.Unmarshal(resp.Payload, &task); err != nil {
+			fmt.Fprintf(os.Stderr, "error parsing response: %v\n", err)
+			os.Exit(1)
+		}
 		fmt.Printf("Task added: %s\n", task.ID)
 		return
 	}
@@ -239,7 +242,10 @@ func cmdList() {
 			os.Exit(1)
 		}
 		var tasks []state.Task
-		json.Unmarshal(resp.Payload, &tasks)
+		if err := json.Unmarshal(resp.Payload, &tasks); err != nil {
+			fmt.Fprintf(os.Stderr, "error parsing response: %v\n", err)
+			os.Exit(1)
+		}
 		printTasks(tasks)
 		return
 	}
@@ -340,7 +346,10 @@ func cmdStatus() {
 		Failed    int          `json:"failed"`
 		Tasks     []state.Task `json:"tasks"`
 	}
-	json.Unmarshal(resp.Payload, &status)
+	if err := json.Unmarshal(resp.Payload, &status); err != nil {
+		fmt.Fprintf(os.Stderr, "error parsing response: %v\n", err)
+		os.Exit(1)
+	}
 
 	fmt.Println("orc is running")
 	fmt.Printf("  Running:   %d\n", status.Running)
@@ -538,8 +547,9 @@ func loadTasks() []state.Task {
 		resp, err := ipc.SendCommand(ipc.Request{Command: ipc.CmdListTasks})
 		if err == nil && resp.OK {
 			var tasks []state.Task
-			json.Unmarshal(resp.Payload, &tasks)
-			return tasks
+			if err := json.Unmarshal(resp.Payload, &tasks); err == nil {
+				return tasks
+			}
 		}
 	}
 	store, err := state.Load()

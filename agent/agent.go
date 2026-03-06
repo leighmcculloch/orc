@@ -63,6 +63,9 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, l
 	// Replace $prompt with a shell command that reads the prompt file
 	shellCmd := strings.Replace(agentCmd, "$prompt", "$(cat "+shellQuote(promptPath)+")", 1)
 
+	// Write the final command for debugging
+	os.WriteFile(filepath.Join(workDir, "command.txt"), []byte(shellCmd), 0644)
+
 	// Capture output to log file
 	logPath := filepath.Join(workDir, "output.log")
 	logFile, err := os.Create(logPath)

@@ -147,7 +147,18 @@ To create a subtask for another agent, write the prompt to a .txt file in the in
   echo "your task prompt" > %s/$(date +%%s)-$RANDOM.txt
 
 Use subtasks only for independent work that can be done in parallel.
-Do not create subtasks for work you can do yourself.`, inboxDir)
+Do not create subtasks for work you can do yourself.
+
+You have limited permissions: you cannot push to remotes, open PRs, or write
+to repositories outside your working directory. Any actions requiring those
+must be done by the user.
+
+When you complete work that requires user action (pushing commits, opening a PR,
+reviewing changes, etc.), write a NOTES.md file in your working directory containing:
+- A brief summary of what you did (first line)
+- Any commands the user should run next
+
+The user will see these notes in the orc dashboard.`, inboxDir)
 }
 
 func writeStatus(workDir string, status ProcessStatus) {

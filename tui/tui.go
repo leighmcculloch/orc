@@ -51,13 +51,26 @@ var (
 	detailTitleStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.Color("205"))
+
+	notificationStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("213")).
+				MarginTop(1)
 )
+
+type notification struct {
+	TaskID  string
+	Prompt  string
+	WorkDir string // absolute path to .orc/workdirs/<task-id>
+	Summary string // first non-empty line of NOTES.md
+}
 
 type viewMode int
 
 const (
 	viewDashboard viewMode = iota
 	viewTaskOutput
+	viewNotes
 )
 
 type model struct {
@@ -71,7 +84,11 @@ type model struct {
 	cursor   int
 	taskList []state.Task // flattened task list for cursor navigation
 
-	// Task output view
+	// Notifications
+	notifications     []notification
+	notificationStart int // index in taskList where notifications begin
+
+	// Task output / notes view
 	viewTaskID   string
 	outputLines  []string
 	outputScroll int
@@ -118,7 +135,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.mode {
 		case viewDashboard:
 			return m.updateDashboard(msg)
-		case viewTaskOutput:
+		case viewTaskOutput, viewNotes:
 			return m.updateTaskOutput(msg)
 		}
 	case tea.WindowSizeMsg:
@@ -131,6 +148,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshTaskList()
 		if m.mode == viewTaskOutput {
 			m.loadOutput()
+		} else if m.mode == viewNotes {
+			m.loadNotes()
 		}
 		return m, tickCmd()
 	case eventMsg:
@@ -149,12 +168,53 @@ func (m *model) refreshTaskList() {
 	var list []state.Task
 	list = append(list, filterTasks(tasks, state.TaskRunning)...)
 	list = append(list, filterTasks(tasks, state.TaskPending)...)
+
+	// Scan for notifications before adding completed/failed
+	m.notifications = nil
+	for _, t := range tasks {
+		if t.Status != state.TaskCompleted && t.Status != state.TaskFailed {
+			continue
+		}
+		workDir, _ := filepath.Abs(filepath.Join(config.OrcDir(), "workdirs", t.ID))
+		notesPath := filepath.Join(workDir, "NOTES.md")
+		if summary := readFirstLine(notesPath); summary != "" {
+			m.notifications = append(m.notifications, notification{
+				TaskID:  t.ID,
+				Prompt:  t.Prompt,
+				WorkDir: workDir,
+				Summary: summary,
+			})
+		}
+	}
+
+	// Notifications get their own slots in the task list (as placeholder tasks)
+	m.notificationStart = len(list)
+	for range m.notifications {
+		list = append(list, state.Task{}) // placeholder entries for cursor navigation
+	}
+
 	list = append(list, filterRecentFinished(tasks, state.TaskCompleted, 10)...)
 	list = append(list, filterRecentFinished(tasks, state.TaskFailed, 5)...)
 	m.taskList = list
 	if m.cursor >= len(m.taskList) && len(m.taskList) > 0 {
 		m.cursor = len(m.taskList) - 1
 	}
+}
+
+func readFirstLine(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 func (m model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -177,11 +237,21 @@ func (m model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		if m.cursor < len(m.taskList) {
-			m.viewTaskID = m.taskList[m.cursor].ID
-			m.outputLines = nil
-			m.outputScroll = 0
-			m.loadOutput()
-			m.mode = viewTaskOutput
+			// Check if cursor is on a notification
+			notifIdx := m.cursor - m.notificationStart
+			if notifIdx >= 0 && notifIdx < len(m.notifications) {
+				m.viewTaskID = m.notifications[notifIdx].TaskID
+				m.outputLines = nil
+				m.outputScroll = 0
+				m.loadNotes()
+				m.mode = viewNotes
+			} else {
+				m.viewTaskID = m.taskList[m.cursor].ID
+				m.outputLines = nil
+				m.outputScroll = 0
+				m.loadOutput()
+				m.mode = viewTaskOutput
+			}
 		}
 	}
 	return m, nil
@@ -193,6 +263,7 @@ func (m model) updateTaskOutput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = viewDashboard
 		m.viewTaskID = ""
 		m.outputLines = nil
+		m.outputScroll = 0
 	case "ctrl+c":
 		if m.confirmQuit {
 			m.quitting = true
@@ -244,6 +315,24 @@ func (m *model) loadOutput() {
 	}
 }
 
+func (m *model) loadNotes() {
+	notesPath := filepath.Join(config.OrcDir(), "workdirs", m.viewTaskID, "NOTES.md")
+	f, err := os.Open(notesPath)
+	if err != nil {
+		m.outputLines = []string{"(no notes)"}
+		return
+	}
+	defer f.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	m.outputLines = lines
+}
+
 func (m model) outputViewHeight() int {
 	// Account for: task ID line, prompt lines, blank line, blank line before help, help line
 	promptLines := 1
@@ -271,7 +360,7 @@ func (m model) View() string {
 		return "Shutting down orc...\n"
 	}
 	switch m.mode {
-	case viewTaskOutput:
+	case viewTaskOutput, viewNotes:
 		return m.viewTaskOutputScreen()
 	default:
 		return m.viewDashboardScreen()
@@ -318,6 +407,26 @@ func (m model) viewDashboardScreen() string {
 		b.WriteString(m.renderTaskLine(idx, t, pendingStyle, "○"))
 		b.WriteString("\n")
 		idx++
+	}
+
+	// Notifications
+	if len(m.notifications) > 0 {
+		b.WriteString(notificationStyle.Render(fmt.Sprintf("Notifications (%d)", len(m.notifications))))
+		b.WriteString("\n")
+		for i, n := range m.notifications {
+			line := fmt.Sprintf("  %s %s  %s", "!", n.TaskID, config.Truncate(n.Summary, 55))
+			if idx == m.cursor {
+				b.WriteString(selectedStyle.Render(lipgloss.NewStyle().Foreground(lipgloss.Color("213")).Render(line)))
+			} else {
+				b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("213")).Render(line))
+			}
+			b.WriteString("\n")
+			if idx == m.cursor {
+				b.WriteString(dimStyle.Render(fmt.Sprintf("     cd %s && cat NOTES.md", m.notifications[i].WorkDir)))
+				b.WriteString("\n")
+			}
+			idx++
+		}
 	}
 
 	// Completed
@@ -407,7 +516,11 @@ func (m model) viewTaskOutputScreen() string {
 	var b strings.Builder
 
 	// Show task ID and full prompt
-	b.WriteString(detailTitleStyle.Render(fmt.Sprintf("Task %s", m.viewTaskID)))
+	if m.mode == viewNotes {
+		b.WriteString(detailTitleStyle.Render(fmt.Sprintf("Task %s — Notes", m.viewTaskID)))
+	} else {
+		b.WriteString(detailTitleStyle.Render(fmt.Sprintf("Task %s", m.viewTaskID)))
+	}
 	b.WriteString("\n")
 	store := m.orc.Store()
 	if t, ok := store.GetTask(m.viewTaskID); ok {

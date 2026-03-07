@@ -11,6 +11,7 @@ import (
 	"github.com/leighmcculloch/orc/agent"
 	"github.com/leighmcculloch/orc/config"
 	"github.com/leighmcculloch/orc/logging"
+	"github.com/leighmcculloch/orc/notify"
 	"github.com/leighmcculloch/orc/report"
 	"github.com/leighmcculloch/orc/state"
 )
@@ -276,6 +277,7 @@ func (o *Orchestrator) startTask(task state.Task) {
 				})
 				o.logger.TaskLog(task.ID, "task failed: %s", errMsg)
 				o.emit(Event{Type: EventTaskFailed, TaskID: task.ID, Message: errMsg})
+				o.notify(fmt.Sprintf("Task %s failed", task.ID), config.Truncate(errMsg, 100))
 			}
 		} else {
 			o.store.UpdateTask(task.ID, func(t *state.Task) {
@@ -284,6 +286,7 @@ func (o *Orchestrator) startTask(task state.Task) {
 			})
 			o.logger.TaskLog(task.ID, "task completed")
 			o.emit(Event{Type: EventTaskCompleted, TaskID: task.ID})
+			o.notify(fmt.Sprintf("Task %s completed", task.ID), config.Truncate(task.Prompt, 100))
 		}
 
 		// Record in daily report
@@ -349,6 +352,12 @@ func (o *Orchestrator) Stop() {
 
 func (o *Orchestrator) Store() *state.Store {
 	return o.store
+}
+
+func (o *Orchestrator) notify(title, body string) {
+	if o.cfg.Notifications.Desktop {
+		notify.Send(title, body)
+	}
 }
 
 // cleanupOldFiles removes log files, reports, and workdirs older than the retention period.

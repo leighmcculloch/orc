@@ -11,7 +11,12 @@ import (
 )
 
 type Config struct {
-	Defaults Defaults `json:"defaults"`
+	Defaults      Defaults      `json:"defaults"`
+	Notifications Notifications `json:"notifications,omitempty"`
+}
+
+type Notifications struct {
+	Desktop bool `json:"desktop,omitempty"`
 }
 
 type Defaults struct {

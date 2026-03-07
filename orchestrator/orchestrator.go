@@ -96,6 +96,9 @@ func (o *Orchestrator) Run() error {
 	}
 	defer config.RemovePid()
 
+	// Run log cleanup once at startup
+	o.cleanupOldFiles()
+
 	// Set up schedules for existing tasks
 	for _, task := range o.store.AllTasks() {
 		if task.Schedule != "" && task.Status == state.TaskPending {
@@ -346,4 +349,61 @@ func (o *Orchestrator) Stop() {
 
 func (o *Orchestrator) Store() *state.Store {
 	return o.store
+}
+
+// cleanupOldFiles removes log files, reports, and workdirs older than the retention period.
+func (o *Orchestrator) cleanupOldFiles() {
+	days := o.cfg.Defaults.LogRetentionDays
+	if days <= 0 {
+		days = 7
+	}
+	cutoff := time.Now().AddDate(0, 0, -days)
+
+	var logCount, workdirCount int
+
+	// Clean up log files
+	logsDir := filepath.Join(config.OrcDir(), "logs")
+	if entries, err := os.ReadDir(logsDir); err == nil {
+		for _, e := range entries {
+			if info, err := e.Info(); err == nil && info.ModTime().Before(cutoff) {
+				os.Remove(filepath.Join(logsDir, e.Name()))
+				logCount++
+			}
+		}
+	}
+
+	// Clean up report files
+	reportsDir := filepath.Join(config.OrcDir(), "reports")
+	if entries, err := os.ReadDir(reportsDir); err == nil {
+		for _, e := range entries {
+			if info, err := e.Info(); err == nil && info.ModTime().Before(cutoff) {
+				os.Remove(filepath.Join(reportsDir, e.Name()))
+				logCount++
+			}
+		}
+	}
+
+	// Clean up workdirs for completed/failed tasks older than retention
+	workdirsDir := filepath.Join(config.OrcDir(), "workdirs")
+	if entries, err := os.ReadDir(workdirsDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			taskID := e.Name()
+			task, ok := o.store.GetTask(taskID)
+			if !ok {
+				continue
+			}
+			if (task.Status == state.TaskCompleted || task.Status == state.TaskFailed) &&
+				task.FinishedAt != nil && task.FinishedAt.Before(cutoff) {
+				os.RemoveAll(filepath.Join(workdirsDir, taskID))
+				workdirCount++
+			}
+		}
+	}
+
+	if logCount > 0 || workdirCount > 0 {
+		o.logger.Log("cleaned up %d log/report files and %d workdirs older than %d days", logCount, workdirCount, days)
+	}
 }

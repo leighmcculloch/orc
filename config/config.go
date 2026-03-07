@@ -15,12 +15,13 @@ type Config struct {
 }
 
 type Defaults struct {
-	MaxConcurrent int    `json:"max_concurrent"`
-	Command       string `json:"command"`
-	MaxRetries    int    `json:"max_retries,omitempty"`
-	RetryBackoff  string `json:"retry_backoff,omitempty"`
-	ShutdownGrace string `json:"shutdown_grace,omitempty"`
-	TaskTimeout   string `json:"task_timeout,omitempty"`
+	MaxConcurrent    int    `json:"max_concurrent"`
+	Command          string `json:"command"`
+	MaxRetries       int    `json:"max_retries,omitempty"`
+	RetryBackoff     string `json:"retry_backoff,omitempty"`
+	ShutdownGrace    string `json:"shutdown_grace,omitempty"`
+	TaskTimeout      string `json:"task_timeout,omitempty"`
+	LogRetentionDays int    `json:"log_retention_days,omitempty"`
 }
 
 func DefaultConfig() Config {

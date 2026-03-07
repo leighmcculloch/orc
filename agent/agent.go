@@ -56,7 +56,8 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, l
 	fullPrompt := prompt + "\n\n" + orcInstructions(absInbox)
 
 	// Write prompt to a file so it can be safely passed to the shell command
-	promptPath := filepath.Join(workDir, "prompt.txt")
+	// Must be absolute since cmd.Dir changes the working directory
+	promptPath, _ := filepath.Abs(filepath.Join(workDir, "prompt.txt"))
 	if err := os.WriteFile(promptPath, []byte(fullPrompt), 0644); err != nil {
 		return Result{ExitCode: 1, Error: fmt.Errorf("writing prompt file: %w", err)}
 	}

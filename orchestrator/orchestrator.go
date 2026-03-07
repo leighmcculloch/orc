@@ -214,13 +214,50 @@ func (o *Orchestrator) startTask(task state.Task) {
 			o.mu.Unlock()
 		}()
 
-		result := agent.Run(o.ctx, o.cfg, task.ID, task.Prompt, func(format string, args ...any) {
+		// Determine timeout: per-task override > global config > no timeout
+		taskCtx := o.ctx
+		var taskCancel context.CancelFunc
+		var timeoutDuration time.Duration
+		timeoutStr := task.Timeout
+		if timeoutStr == "" {
+			timeoutStr = o.cfg.Defaults.TaskTimeout
+		}
+		if timeoutStr != "" {
+			if d, err := time.ParseDuration(timeoutStr); err == nil && d > 0 {
+				timeoutDuration = d
+				taskCtx, taskCancel = context.WithTimeout(o.ctx, d)
+				o.logger.TaskLog(task.ID, "timeout set: %s", d)
+			}
+		}
+		if taskCancel != nil {
+			defer taskCancel()
+		}
+
+		result := agent.Run(taskCtx, o.cfg, task.ID, task.Prompt, func(format string, args ...any) {
 			o.logger.TaskLog(task.ID, format, args...)
 		})
 
 		now := time.Now()
+
+		// Check for timeout
+		if result.Error != nil && taskCtx.Err() == context.DeadlineExceeded {
+			timeoutMsg := fmt.Sprintf("timeout after %s", timeoutDuration)
+			o.store.UpdateTask(task.ID, func(t *state.Task) {
+				t.Status = state.TaskFailed
+				t.FinishedAt = &now
+				t.Error = timeoutMsg
+			})
+			o.logger.TaskLog(task.ID, "task timed out after %s", timeoutDuration)
+			o.emit(Event{Type: EventTaskFailed, TaskID: task.ID, Message: timeoutMsg})
+			o.notify(fmt.Sprintf("Task %s timed out", task.ID), timeoutMsg)
+			if updated, ok := o.store.GetTask(task.ID); ok {
+				report.RecordCompletion(updated)
+			}
+			return
+		}
+
 		if result.Error != nil && o.ctx.Err() != nil {
-			// Context cancelled, task was interrupted
+			// Context cancelled (orchestrator shutdown), task was interrupted
 			o.store.UpdateTask(task.ID, func(t *state.Task) {
 				t.Status = state.TaskCancelled
 				t.FinishedAt = &now

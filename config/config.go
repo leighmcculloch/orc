@@ -48,6 +48,7 @@ func EnsureOrcDir() error {
 		filepath.Join(OrcDir(), "workdirs"),
 		filepath.Join(OrcDir(), "jobs"),
 		filepath.Join(OrcDir(), "jobs", "inbox"),
+		filepath.Join(OrcDir(), "jobs", "kill"),
 		filepath.Join(OrcDir(), "reports"),
 	}
 	for _, d := range dirs {

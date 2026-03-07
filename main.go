@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/leighmcculloch/orc/config"
@@ -47,10 +48,12 @@ func main() {
 	ls.GroupID = "tasks"
 	rm := removeCmd()
 	rm.GroupID = "tasks"
+	kill := killCmd()
+	kill.GroupID = "tasks"
 	rpt := reportCmd()
 	rpt.GroupID = "tasks"
 
-	rootCmd.AddCommand(run, status, log, add, ls, rm, rpt)
+	rootCmd.AddCommand(run, status, log, add, ls, rm, kill, rpt)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -372,6 +375,86 @@ func removeCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("Task removed: %s\n", taskID)
+			return nil
+		},
+	}
+}
+
+func killCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "kill [task-id]",
+		Aliases: []string{"cancel"},
+		Short:   "Kill a running task",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			taskID := ""
+			if len(args) > 0 {
+				taskID = args[0]
+			} else {
+				// Interactive picker filtered to running tasks
+				store, err := state.Load()
+				if err != nil {
+					return err
+				}
+				running := store.TasksByStatus(state.TaskRunning)
+				if len(running) == 0 {
+					fmt.Println("No running tasks.")
+					return nil
+				}
+				items := make([]pick.Item, len(running))
+				for i, t := range running {
+					items[i] = pick.Item{
+						ID:    t.ID,
+						Label: fmt.Sprintf("%-10s %s", t.ID, config.Truncate(t.Prompt, 50)),
+					}
+				}
+				item, ok := pick.Run("Select task to kill:", items)
+				if !ok {
+					return nil
+				}
+				taskID = item.ID
+			}
+			if taskID == "" {
+				return nil
+			}
+
+			// Verify task is running
+			store, err := state.Load()
+			if err != nil {
+				return err
+			}
+			task, ok := store.GetTask(taskID)
+			if !ok {
+				return fmt.Errorf("task %s not found", taskID)
+			}
+			if task.Status != state.TaskRunning {
+				return fmt.Errorf("task %s is not running (status: %s)", taskID, task.Status)
+			}
+
+			if config.IsRunning() {
+				// Orchestrator is running — write kill request file
+				killPath := filepath.Join(config.OrcDir(), "jobs", "kill", taskID)
+				if err := os.WriteFile(killPath, []byte(""), 0644); err != nil {
+					return fmt.Errorf("writing kill request: %w", err)
+				}
+				fmt.Printf("Kill request sent for task %s\n", taskID)
+			} else {
+				// Orchestrator not running — signal the PID directly
+				if task.PID <= 0 {
+					return fmt.Errorf("task %s has no PID recorded", taskID)
+				}
+				// Send SIGTERM to the process group
+				syscall.Kill(-task.PID, syscall.SIGTERM)
+				fmt.Printf("Sent SIGTERM to task %s (pid %d)\n", taskID, task.PID)
+
+				// Update task status
+				store.UpdateTask(taskID, func(t *state.Task) {
+					now := time.Now()
+					t.Status = state.TaskCancelled
+					t.FinishedAt = &now
+					t.Error = "killed"
+				})
+			}
 			return nil
 		},
 	}

@@ -27,7 +27,7 @@ type Result struct {
 	Error    error
 }
 
-func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, logFn func(string, ...any)) Result {
+func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, logFn func(string, ...any), pidFn ...func(int)) Result {
 	workDir := filepath.Join(config.OrcDir(), "workdirs", taskID)
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		return Result{ExitCode: 1, Error: fmt.Errorf("creating work dir: %w", err)}
@@ -101,6 +101,9 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, l
 	}
 
 	logFn("agent process started (pid: %d)", cmd.Process.Pid)
+	if len(pidFn) > 0 && pidFn[0] != nil {
+		pidFn[0](cmd.Process.Pid)
+	}
 
 	// Watch for context cancellation and handle graceful shutdown
 	doneCh := make(chan struct{})

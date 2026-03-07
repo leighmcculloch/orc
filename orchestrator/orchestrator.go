@@ -31,7 +31,8 @@ type Orchestrator struct {
 	eventCh       chan Event
 	wg            sync.WaitGroup
 
-	schedules map[string]*scheduleEntry
+	schedules   map[string]*scheduleEntry
+	taskCancels map[string]context.CancelFunc
 }
 
 type scheduleEntry struct {
@@ -72,6 +73,7 @@ func New(cfg config.Config, store *state.Store, logger *logging.Logger) (*Orches
 		stopCh:        make(chan struct{}),
 		eventCh:       make(chan Event, 100),
 		schedules:     make(map[string]*scheduleEntry),
+		taskCancels:   make(map[string]context.CancelFunc),
 	}
 
 	return o, nil
@@ -132,6 +134,9 @@ func (o *Orchestrator) Run() error {
 }
 
 func (o *Orchestrator) tick() {
+	// Check for kill requests
+	o.pollKillRequests()
+
 	// Check for new tasks dropped into jobs/inbox/ by orc-add
 	o.pollJobInbox()
 
@@ -215,7 +220,7 @@ func (o *Orchestrator) startTask(task state.Task) {
 		}()
 
 		// Determine timeout: per-task override > global config > no timeout
-		taskCtx := o.ctx
+		var taskCtx context.Context
 		var taskCancel context.CancelFunc
 		var timeoutDuration time.Duration
 		timeoutStr := task.Timeout
@@ -229,12 +234,27 @@ func (o *Orchestrator) startTask(task state.Task) {
 				o.logger.TaskLog(task.ID, "timeout set: %s", d)
 			}
 		}
-		if taskCancel != nil {
-			defer taskCancel()
+		if taskCancel == nil {
+			taskCtx, taskCancel = context.WithCancel(o.ctx)
 		}
+		defer taskCancel()
+
+		// Register cancel func so Kill() can use it
+		o.mu.Lock()
+		o.taskCancels[task.ID] = taskCancel
+		o.mu.Unlock()
+		defer func() {
+			o.mu.Lock()
+			delete(o.taskCancels, task.ID)
+			o.mu.Unlock()
+		}()
 
 		result := agent.Run(taskCtx, o.cfg, task.ID, task.Prompt, func(format string, args ...any) {
 			o.logger.TaskLog(task.ID, format, args...)
+		}, func(pid int) {
+			o.store.UpdateTask(task.ID, func(t *state.Task) {
+				t.PID = pid
+			})
 		})
 
 		now := time.Now()
@@ -384,6 +404,38 @@ func (o *Orchestrator) Stop() {
 	case <-o.stopCh:
 	default:
 		close(o.stopCh)
+	}
+}
+
+// Kill cancels a running task by ID.
+func (o *Orchestrator) Kill(taskID string) error {
+	o.mu.Lock()
+	cancel, ok := o.taskCancels[taskID]
+	o.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("task %s is not running", taskID)
+	}
+	o.logger.TaskLog(taskID, "kill requested")
+	cancel()
+	return nil
+}
+
+// pollKillRequests checks for kill request files written by the CLI.
+func (o *Orchestrator) pollKillRequests() {
+	killDir := filepath.Join(config.OrcDir(), "jobs", "kill")
+	entries, err := os.ReadDir(killDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		taskID := e.Name()
+		os.Remove(filepath.Join(killDir, taskID))
+		if err := o.Kill(taskID); err != nil {
+			o.logger.Log("kill request for task %s: %v", taskID, err)
+		}
 	}
 }
 

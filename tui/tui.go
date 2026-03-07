@@ -125,6 +125,10 @@ type model struct {
 	searchMatches []int // line indices of matches
 	searchIdx     int   // current match index
 
+	// Kill confirmation
+	confirmKill   bool
+	confirmKillID string
+
 	// Quit confirmation
 	confirmQuit   bool
 	confirmQuitAt time.Time
@@ -285,6 +289,27 @@ func readFirstLine(path string) string {
 }
 
 func (m model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Kill confirmation mode
+	if m.confirmKill {
+		switch msg.String() {
+		case "y":
+			if err := m.orc.Kill(m.confirmKillID); err == nil {
+				m.events = append(m.events, orchestrator.Event{
+					Type:    orchestrator.EventTaskFailed,
+					TaskID:  m.confirmKillID,
+					Message: "killed from TUI",
+					Time:    time.Now(),
+				})
+			}
+			m.confirmKill = false
+			m.confirmKillID = ""
+		default:
+			m.confirmKill = false
+			m.confirmKillID = ""
+		}
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "q", "ctrl+c":
 		if m.confirmQuit {
@@ -294,6 +319,15 @@ func (m model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.confirmQuit = true
 		m.confirmQuitAt = time.Now()
+	case "x":
+		// Kill running task under cursor
+		if m.cursor < len(m.taskList) {
+			t := m.taskList[m.cursor]
+			if t.Status == state.TaskRunning {
+				m.confirmKill = true
+				m.confirmKillID = t.ID
+			}
+		}
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
@@ -677,10 +711,12 @@ func (m model) viewDashboardScreen() string {
 	}
 
 	b.WriteString("\n")
-	if m.confirmQuit {
+	if m.confirmKill {
+		b.WriteString(failedStyle.Render(fmt.Sprintf("Kill task %s? (y/n)", m.confirmKillID)))
+	} else if m.confirmQuit {
 		b.WriteString(failedStyle.Render("Press q or ctrl+c again to quit"))
 	} else {
-		b.WriteString(dimStyle.Render("↑/↓ navigate • enter view output • q quit"))
+		b.WriteString(dimStyle.Render("↑/↓ navigate • enter view output • x kill • q quit"))
 	}
 	b.WriteString("\n")
 

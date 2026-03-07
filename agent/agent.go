@@ -56,14 +56,15 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, l
 	fullPrompt := prompt + "\n\n" + orcInstructions(absInbox)
 
 	// Write prompt to a file so it can be safely passed to the shell command
-	// Must be absolute since cmd.Dir changes the working directory
-	promptPath, _ := filepath.Abs(filepath.Join(workDir, "prompt.txt"))
+	// Use just the filename since cmd.Dir is set to workDir
+	promptPath := filepath.Join(workDir, "prompt.txt")
 	if err := os.WriteFile(promptPath, []byte(fullPrompt), 0644); err != nil {
 		return Result{ExitCode: 1, Error: fmt.Errorf("writing prompt file: %w", err)}
 	}
 
 	// Replace $prompt with a shell command that reads the prompt file
-	shellCmd := strings.Replace(agentCmd, "$prompt", "$(cat "+shellQuote(promptPath)+")", 1)
+	// Use just "prompt.txt" since the command runs with cmd.Dir set to workDir
+	shellCmd := strings.Replace(agentCmd, "$prompt", "$(cat "+shellQuote("prompt.txt")+")", 1)
 
 	// Write the final command for debugging
 	os.WriteFile(filepath.Join(workDir, "command.txt"), []byte(shellCmd), 0644)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -35,6 +36,8 @@ func main() {
 
 	run := runCmd()
 	run.GroupID = "orchestrator"
+	status := statusCmd()
+	status.GroupID = "orchestrator"
 	log := logCmd()
 	log.GroupID = "orchestrator"
 
@@ -47,7 +50,7 @@ func main() {
 	rpt := reportCmd()
 	rpt.GroupID = "tasks"
 
-	rootCmd.AddCommand(run, log, add, ls, rm, rpt)
+	rootCmd.AddCommand(run, status, log, add, ls, rm, rpt)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -123,6 +126,153 @@ func runOrchestrator() error {
 	}()
 
 	return tui.Run(orc)
+}
+
+func statusCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show orchestrator status overview",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			jsonOutput, _ := cmd.Flags().GetBool("json")
+			return showStatus(jsonOutput)
+		},
+	}
+	cmd.Flags().Bool("json", false, "output in JSON format")
+	return cmd
+}
+
+func showStatus(jsonOutput bool) error {
+	store, err := state.Load()
+	if err != nil {
+		return err
+	}
+
+	tasks := store.AllTasks()
+
+	// Count tasks by status
+	counts := map[state.TaskStatus]int{}
+	var running, pending, recentFailed []state.Task
+	for _, t := range tasks {
+		counts[t.Status]++
+		switch t.Status {
+		case state.TaskRunning:
+			running = append(running, t)
+		case state.TaskPending:
+			pending = append(pending, t)
+		case state.TaskFailed:
+			recentFailed = append(recentFailed, t)
+		}
+	}
+
+	// Limit recent failures to last 5
+	if len(recentFailed) > 5 {
+		recentFailed = recentFailed[len(recentFailed)-5:]
+	}
+
+	pid, isRunning := config.RunningPid()
+
+	if jsonOutput {
+		type jsonTask struct {
+			ID       string `json:"id"`
+			Prompt   string `json:"prompt"`
+			Schedule string `json:"schedule,omitempty"`
+			Elapsed  string `json:"elapsed,omitempty"`
+			Error    string `json:"error,omitempty"`
+		}
+		type jsonOutput struct {
+			Running bool           `json:"running"`
+			PID     int            `json:"pid,omitempty"`
+			Tasks   map[string]int `json:"tasks"`
+			RunList []jsonTask     `json:"running_tasks"`
+			Pending []jsonTask     `json:"pending_tasks"`
+			Failed  []jsonTask     `json:"recent_failures"`
+		}
+		out := jsonOutput{
+			Running: isRunning,
+			Tasks: map[string]int{
+				"running":   counts[state.TaskRunning],
+				"pending":   counts[state.TaskPending],
+				"completed": counts[state.TaskCompleted],
+				"failed":    counts[state.TaskFailed],
+				"cancelled": counts[state.TaskCancelled],
+			},
+		}
+		if isRunning {
+			out.PID = pid
+		}
+		for _, t := range running {
+			jt := jsonTask{ID: t.ID, Prompt: t.Prompt, Schedule: t.Schedule}
+			if t.StartedAt != nil {
+				jt.Elapsed = time.Since(*t.StartedAt).Truncate(time.Second).String()
+			}
+			out.RunList = append(out.RunList, jt)
+		}
+		for _, t := range pending {
+			jt := jsonTask{ID: t.ID, Prompt: t.Prompt, Schedule: t.Schedule}
+			out.Pending = append(out.Pending, jt)
+		}
+		for _, t := range recentFailed {
+			jt := jsonTask{ID: t.ID, Prompt: t.Prompt, Error: t.Error}
+			if t.FinishedAt != nil {
+				jt.Elapsed = time.Since(*t.FinishedAt).Truncate(time.Second).String() + " ago"
+			}
+			out.Failed = append(out.Failed, jt)
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	}
+
+	// Human-readable output
+	if isRunning {
+		fmt.Printf("orc status: running (pid %d)\n", pid)
+	} else {
+		fmt.Println("orc status: stopped")
+	}
+
+	fmt.Printf("\nTasks:  %d running  %d pending  %d completed  %d failed\n",
+		counts[state.TaskRunning], counts[state.TaskPending],
+		counts[state.TaskCompleted], counts[state.TaskFailed])
+
+	if len(running) > 0 {
+		fmt.Println("\nRunning:")
+		for _, t := range running {
+			elapsed := ""
+			if t.StartedAt != nil {
+				elapsed = fmt.Sprintf(" (%s)", time.Since(*t.StartedAt).Truncate(time.Second))
+			}
+			fmt.Printf("  #%-4s %s%s\n", t.ID, config.Truncate(t.Prompt, 50), elapsed)
+		}
+	}
+
+	if len(pending) > 0 {
+		fmt.Println("\nPending:")
+		for _, t := range pending {
+			sched := ""
+			if t.Schedule != "" {
+				sched = " [" + t.Schedule + "]"
+			}
+			fmt.Printf("  #%-4s %s%s\n", t.ID, config.Truncate(t.Prompt, 50), sched)
+		}
+	}
+
+	if len(recentFailed) > 0 {
+		fmt.Println("\nRecent failures:")
+		for _, t := range recentFailed {
+			ago := ""
+			if t.FinishedAt != nil {
+				ago = fmt.Sprintf(" (%s ago)", time.Since(*t.FinishedAt).Truncate(time.Second))
+			}
+			errInfo := ""
+			if t.Error != "" {
+				errInfo = " — " + config.Truncate(t.Error, 40)
+			}
+			fmt.Printf("  #%-4s %s%s%s\n", t.ID, config.Truncate(t.Prompt, 40), errInfo, ago)
+		}
+	}
+
+	return nil
 }
 
 func addCmd() *cobra.Command {

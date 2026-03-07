@@ -32,6 +32,10 @@ type Task struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 	Error      string     `json:"error,omitempty"`
 	PID        int        `json:"pid,omitempty"`
+	MaxRetries int        `json:"max_retries,omitempty"`
+	RetryCount int        `json:"retry_count,omitempty"`
+	RetryAfter *time.Time `json:"retry_after,omitempty"`
+	Timeout    string     `json:"timeout,omitempty"`
 }
 
 type meta struct {

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/leighmcculloch/orc/config"
@@ -74,8 +75,19 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, l
 	}
 	defer logFile.Close()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", shellCmd)
+	// Parse shutdown grace period
+	graceDuration := 10 * time.Second
+	if cfg.Defaults.ShutdownGrace != "" {
+		if d, err := time.ParseDuration(cfg.Defaults.ShutdownGrace); err == nil {
+			graceDuration = d
+		}
+	}
+
+	// Use exec.Command (not CommandContext) so we can handle signals ourselves
+	cmd := exec.Command("sh", "-c", shellCmd)
 	cmd.Dir = workDir
+	// Set process group so we can signal the entire group
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -89,6 +101,37 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, l
 	}
 
 	logFn("agent process started (pid: %d)", cmd.Process.Pid)
+
+	// Watch for context cancellation and handle graceful shutdown
+	doneCh := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			// Context cancelled — attempt graceful shutdown
+			writeStatus(workDir, ProcessStatus{
+				TaskID:    taskID,
+				Status:    "stopping",
+				UpdatedAt: time.Now(),
+				Message:   "sending SIGTERM",
+			})
+			logFn("sending SIGTERM to process group (pid: %d)", cmd.Process.Pid)
+			// Signal the entire process group
+			syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+
+			// Wait for grace period or process exit
+			select {
+			case <-doneCh:
+				// Process exited within grace period
+				return
+			case <-time.After(graceDuration):
+				// Grace period expired, force kill
+				logFn("grace period expired, sending SIGKILL (pid: %d)", cmd.Process.Pid)
+				syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
+		case <-doneCh:
+			// Process exited normally, no need to signal
+		}
+	}()
 
 	// Stream output to log file
 	scanner := bufio.NewScanner(stdout)
@@ -105,6 +148,8 @@ func Run(ctx context.Context, cfg config.Config, taskID string, prompt string, l
 	}
 
 	err = cmd.Wait()
+	close(doneCh)
+
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {

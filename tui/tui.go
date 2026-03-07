@@ -58,6 +58,13 @@ var (
 				Bold(true).
 				Foreground(lipgloss.Color("213")).
 				MarginTop(1)
+
+	searchMatchStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("226")).
+				Foreground(lipgloss.Color("0"))
+
+	searchBarStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("226"))
 )
 
 type notification struct {
@@ -97,6 +104,13 @@ type model struct {
 
 	// Live agent status
 	taskStatuses map[string]string
+
+	// Search state
+	searchActive  bool
+	searchInput   string
+	searchQuery   string
+	searchMatches []int // line indices of matches
+	searchIdx     int   // current match index
 
 	// Quit confirmation
 	confirmQuit   bool
@@ -280,12 +294,51 @@ func (m model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateTaskOutput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Search input mode
+	if m.searchActive {
+		switch msg.Type {
+		case tea.KeyEscape:
+			m.searchActive = false
+			m.searchInput = ""
+		case tea.KeyEnter:
+			m.searchActive = false
+			m.searchQuery = m.searchInput
+			m.searchInput = ""
+			m.updateSearchMatches()
+			if len(m.searchMatches) > 0 {
+				m.searchIdx = 0
+				m.scrollToSearchMatch()
+			}
+		case tea.KeyBackspace:
+			if len(m.searchInput) > 0 {
+				m.searchInput = m.searchInput[:len(m.searchInput)-1]
+			}
+		default:
+			if msg.Type == tea.KeyRunes {
+				m.searchInput += string(msg.Runes)
+			} else if msg.Type == tea.KeySpace {
+				m.searchInput += " "
+			}
+		}
+		return m, nil
+	}
+
 	switch msg.String() {
-	case "q", "esc":
+	case "q":
 		m.mode = viewDashboard
 		m.viewTaskID = ""
 		m.outputLines = nil
 		m.outputScroll = 0
+		m.clearSearch()
+	case "esc":
+		if m.searchQuery != "" {
+			m.clearSearch()
+		} else {
+			m.mode = viewDashboard
+			m.viewTaskID = ""
+			m.outputLines = nil
+			m.outputScroll = 0
+		}
 	case "ctrl+c":
 		if m.confirmQuit {
 			m.quitting = true
@@ -294,6 +347,19 @@ func (m model) updateTaskOutput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.confirmQuit = true
 		m.confirmQuitAt = time.Now()
+	case "/":
+		m.searchActive = true
+		m.searchInput = ""
+	case "n":
+		if m.searchQuery != "" && len(m.searchMatches) > 0 {
+			m.searchIdx = (m.searchIdx + 1) % len(m.searchMatches)
+			m.scrollToSearchMatch()
+		}
+	case "N":
+		if m.searchQuery != "" && len(m.searchMatches) > 0 {
+			m.searchIdx = (m.searchIdx - 1 + len(m.searchMatches)) % len(m.searchMatches)
+			m.scrollToSearchMatch()
+		}
 	case "up", "k":
 		if m.outputScroll > 0 {
 			m.outputScroll--
@@ -309,6 +375,45 @@ func (m model) updateTaskOutput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.outputScroll = 0
 	}
 	return m, nil
+}
+
+func (m *model) updateSearchMatches() {
+	m.searchMatches = nil
+	if m.searchQuery == "" {
+		return
+	}
+	query := strings.ToLower(m.searchQuery)
+	for i, line := range m.outputLines {
+		if strings.Contains(strings.ToLower(line), query) {
+			m.searchMatches = append(m.searchMatches, i)
+		}
+	}
+}
+
+func (m *model) scrollToSearchMatch() {
+	if len(m.searchMatches) == 0 {
+		return
+	}
+	lineIdx := m.searchMatches[m.searchIdx]
+	viewH := m.outputViewHeight()
+	// Center the match in the view
+	target := lineIdx - viewH/2
+	if target < 0 {
+		target = 0
+	}
+	max := m.maxOutputScroll()
+	if target > max {
+		target = max
+	}
+	m.outputScroll = target
+}
+
+func (m *model) clearSearch() {
+	m.searchQuery = ""
+	m.searchInput = ""
+	m.searchActive = false
+	m.searchMatches = nil
+	m.searchIdx = 0
 }
 
 func (m *model) loadOutput() {
@@ -330,6 +435,11 @@ func (m *model) loadOutput() {
 		lines = append(lines, scanner.Text())
 	}
 	m.outputLines = lines
+
+	// Re-run search if active
+	if m.searchQuery != "" {
+		m.updateSearchMatches()
+	}
 
 	// Auto-scroll to bottom if we were already at the bottom
 	if wasAtBottom {
@@ -561,6 +671,16 @@ func (m model) viewTaskOutputScreen() string {
 
 	viewH := m.outputViewHeight()
 
+	// Build a set of matching line indices for fast lookup
+	matchSet := make(map[int]bool, len(m.searchMatches))
+	for _, idx := range m.searchMatches {
+		matchSet[idx] = true
+	}
+	currentMatchLine := -1
+	if len(m.searchMatches) > 0 {
+		currentMatchLine = m.searchMatches[m.searchIdx]
+	}
+
 	if len(m.outputLines) == 0 {
 		b.WriteString(dimStyle.Render("(no output yet)"))
 		b.WriteString("\n")
@@ -573,17 +693,28 @@ func (m model) viewTaskOutputScreen() string {
 		if start > len(m.outputLines) {
 			start = len(m.outputLines)
 		}
-		for _, line := range m.outputLines[start:end] {
-			b.WriteString(logStyle.Render(line))
+		for i := start; i < end; i++ {
+			line := m.outputLines[i]
+			if i == currentMatchLine {
+				b.WriteString(searchMatchStyle.Render(line))
+			} else if matchSet[i] {
+				b.WriteString(searchBarStyle.Render(line))
+			} else {
+				b.WriteString(logStyle.Render(line))
+			}
 			b.WriteString("\n")
 		}
 	}
 
 	b.WriteString("\n")
-	if m.confirmQuit {
+	if m.searchActive {
+		b.WriteString(searchBarStyle.Render(fmt.Sprintf("/%s", m.searchInput)))
+	} else if m.confirmQuit {
 		b.WriteString(failedStyle.Render("Press ctrl+c again to quit"))
+	} else if m.searchQuery != "" {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("Match %d/%d — ↑/↓ scroll • n/N next/prev • esc clear • q back", m.searchIdx+1, len(m.searchMatches))))
 	} else {
-		b.WriteString(dimStyle.Render("↑/↓ scroll • g top • G bottom • q back"))
+		b.WriteString(dimStyle.Render("↑/↓ scroll • g top • G bottom • / search • q back"))
 	}
 	b.WriteString("\n")
 

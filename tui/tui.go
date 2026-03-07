@@ -2,12 +2,14 @@ package tui
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/leighmcculloch/orc/agent"
 	"github.com/leighmcculloch/orc/config"
 	"github.com/leighmcculloch/orc/orchestrator"
 	"github.com/leighmcculloch/orc/state"
@@ -93,6 +95,9 @@ type model struct {
 	outputLines  []string
 	outputScroll int
 
+	// Live agent status
+	taskStatuses map[string]string
+
 	// Quit confirmation
 	confirmQuit   bool
 	confirmQuitAt time.Time
@@ -166,7 +171,24 @@ func (m *model) refreshTaskList() {
 	store := m.orc.Store()
 	tasks := store.AllTasks()
 	var list []state.Task
-	list = append(list, filterTasks(tasks, state.TaskRunning)...)
+	running := filterTasks(tasks, state.TaskRunning)
+	list = append(list, running...)
+
+	// Read live status for running tasks
+	if m.taskStatuses == nil {
+		m.taskStatuses = make(map[string]string)
+	}
+	for _, t := range running {
+		statusPath := filepath.Join(config.OrcDir(), "workdirs", t.ID, "status.json")
+		data, err := os.ReadFile(statusPath)
+		if err != nil {
+			continue
+		}
+		var ps agent.ProcessStatus
+		if json.Unmarshal(data, &ps) == nil && ps.Message != "" {
+			m.taskStatuses[t.ID] = ps.Message
+		}
+	}
 	list = append(list, filterTasks(tasks, state.TaskPending)...)
 
 	// Scan for notifications before adding completed/failed
@@ -393,6 +415,14 @@ func (m model) viewDashboardScreen() string {
 	for _, t := range running {
 		b.WriteString(m.renderTaskLine(idx, t, runningStyle, "●"))
 		b.WriteString("\n")
+		if msg, ok := m.taskStatuses[t.ID]; ok {
+			maxW := m.width - 6
+			if maxW < 20 {
+				maxW = 80
+			}
+			b.WriteString(dimStyle.Render("    " + config.Truncate(msg, maxW)))
+			b.WriteString("\n")
+		}
 		idx++
 	}
 

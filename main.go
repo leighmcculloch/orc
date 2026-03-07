@@ -427,6 +427,8 @@ func logCmd() *cobra.Command {
 			date, _ := cmd.Flags().GetString("date")
 			follow, _ := cmd.Flags().GetBool("follow")
 			taskID, _ := cmd.Flags().GetString("task")
+			level, _ := cmd.Flags().GetString("level")
+			outputOnly, _ := cmd.Flags().GetBool("output-only")
 
 			taskFlagSet := cmd.Flags().Changed("task")
 
@@ -438,23 +440,41 @@ func logCmd() *cobra.Command {
 				if id == "" {
 					return nil
 				}
-				logPath := filepath.Join(config.OrcDir(), "workdirs", id, "output.log")
 
+				// --output-only: show only agent stdout
+				if outputOnly {
+					logPath := filepath.Join(config.OrcDir(), "workdirs", id, "output.log")
+					if follow {
+						streamFile(logPath)
+						return nil
+					}
+					data, err := os.ReadFile(logPath)
+					if err != nil {
+						return fmt.Errorf("no output log for task %s\n\n  The task may not have started yet, or the log file was removed.", id)
+					}
+					fmt.Print(string(data))
+					return nil
+				}
+
+				// Default: interleaved orchestrator task logs + agent output
 				if follow {
+					logPath := filepath.Join(config.OrcDir(), "workdirs", id, "output.log")
 					streamFile(logPath)
 					return nil
 				}
 
-				data, err := os.ReadFile(logPath)
+				lines, err := logging.ReadTaskLog(id)
 				if err != nil {
-					return fmt.Errorf("no output log for task %s\n\n  The task may not have started yet, or the log file was removed.", id)
+					return err
 				}
-				fmt.Print(string(data))
+				for _, line := range lines {
+					fmt.Println(line)
+				}
 				return nil
 			}
 
 			if follow {
-				ch, cancel, err := logging.StreamLog(date, true)
+				ch, cancel, err := logging.StreamLog(date, true, level)
 				if err != nil {
 					return err
 				}
@@ -465,7 +485,7 @@ func logCmd() *cobra.Command {
 				return nil
 			}
 
-			lines, err := logging.ReadLog(date)
+			lines, err := logging.ReadLog(date, level)
 			if err != nil {
 				return err
 			}
@@ -478,6 +498,8 @@ func logCmd() *cobra.Command {
 	cmd.Flags().StringP("date", "d", time.Now().Format("2006-01-02"), "date to view logs for (YYYY-MM-DD)")
 	cmd.Flags().BoolP("follow", "f", false, "follow/stream log output")
 	cmd.Flags().StringP("task", "t", "", "task ID to view logs for")
+	cmd.Flags().StringP("level", "l", "all", `log level filter: "all", "orc", or "task"`)
+	cmd.Flags().Bool("output-only", false, "show only agent output (use with -t)")
 	return cmd
 }
 

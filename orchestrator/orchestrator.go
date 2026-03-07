@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -46,6 +47,7 @@ const (
 	EventTaskCompleted
 	EventTaskFailed
 	EventTaskRemoved
+	EventTaskRetrying
 	EventLog
 )
 
@@ -143,6 +145,7 @@ func (o *Orchestrator) tick() {
 						t.FinishedAt = nil
 						t.Error = ""
 					})
+					o.logger.SchedLog("re-queued task %s (%s)", task.ID, sched.cron)
 				}
 			}
 			sched.nextRun = nextScheduleTime(sched.cron)
@@ -164,8 +167,13 @@ func (o *Orchestrator) tick() {
 	}
 
 	pending := o.store.TasksByStatus(state.TaskPending)
-	for i := 0; i < len(pending) && i < available; i++ {
+	started := 0
+	for i := 0; i < len(pending) && started < available; i++ {
 		task := pending[i]
+		// Skip tasks with a retry backoff that hasn't elapsed
+		if task.RetryAfter != nil && time.Now().Before(*task.RetryAfter) {
+			continue
+		}
 		// Only start non-scheduled tasks immediately, or scheduled tasks whose time has come
 		if task.Schedule != "" {
 			if sched, ok := o.schedules[task.ID]; ok {
@@ -175,6 +183,7 @@ func (o *Orchestrator) tick() {
 			}
 		}
 		o.startTask(task)
+		started++
 	}
 }
 
@@ -223,13 +232,48 @@ func (o *Orchestrator) startTask(task state.Task) {
 			if result.Error != nil {
 				errMsg = result.Error.Error()
 			}
-			o.store.UpdateTask(task.ID, func(t *state.Task) {
-				t.Status = state.TaskFailed
-				t.FinishedAt = &now
-				t.Error = errMsg
-			})
-			o.logger.TaskLog(task.ID, "task failed: %s", errMsg)
-			o.emit(Event{Type: EventTaskFailed, TaskID: task.ID, Message: errMsg})
+
+			// Check if we should retry
+			maxRetries := o.cfg.Defaults.MaxRetries
+			// Refresh task to get current RetryCount and per-task override
+			current, _ := o.store.GetTask(task.ID)
+			if current.MaxRetries > 0 {
+				maxRetries = current.MaxRetries
+			}
+
+			// Do not retry timeout failures (context.DeadlineExceeded)
+			isTimeout := result.Error == context.DeadlineExceeded
+
+			if maxRetries > 0 && current.RetryCount < maxRetries && !isTimeout {
+				// Parse backoff duration
+				backoff := 30 * time.Second
+				if o.cfg.Defaults.RetryBackoff != "" {
+					if d, err := time.ParseDuration(o.cfg.Defaults.RetryBackoff); err == nil {
+						backoff = d
+					}
+				}
+				retryAfter := now.Add(backoff)
+				attempt := current.RetryCount + 1
+
+				o.store.UpdateTask(task.ID, func(t *state.Task) {
+					t.Status = state.TaskPending
+					t.StartedAt = nil
+					t.FinishedAt = nil
+					t.Error = ""
+					t.RetryCount = attempt
+					t.RetryAfter = &retryAfter
+				})
+				o.logger.TaskLog(task.ID, "task failed, retrying (attempt %d/%d) after %s", attempt, maxRetries, backoff)
+				o.emit(Event{Type: EventTaskRetrying, TaskID: task.ID, Message: fmt.Sprintf("retry %d/%d after %s", attempt, maxRetries, backoff)})
+			} else {
+				o.store.UpdateTask(task.ID, func(t *state.Task) {
+					t.Status = state.TaskFailed
+					t.FinishedAt = &now
+					t.Error = errMsg
+				})
+				o.logger.TaskLog(task.ID, "task failed: %s", errMsg)
+				o.emit(Event{Type: EventTaskFailed, TaskID: task.ID, Message: errMsg})
+			}
 		} else {
 			o.store.UpdateTask(task.ID, func(t *state.Task) {
 				t.Status = state.TaskCompleted

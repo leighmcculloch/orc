@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,7 +41,24 @@ func (l *Logger) Log(format string, args ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	msg := fmt.Sprintf(format, args...)
-	line := fmt.Sprintf("[%s] %s\n", time.Now().Format("15:04:05"), msg)
+	line := fmt.Sprintf("[%s] [orc] %s\n", time.Now().Format("15:04:05"), msg)
+	for _, w := range l.writers {
+		w.Write([]byte(line))
+	}
+	for _, ch := range l.listeners {
+		select {
+		case ch <- line:
+		default:
+		}
+	}
+}
+
+// SchedLog logs schedule-related events with the [sched] prefix.
+func (l *Logger) SchedLog(format string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	msg := fmt.Sprintf(format, args...)
+	line := fmt.Sprintf("[%s] [sched] %s\n", time.Now().Format("15:04:05"), msg)
 	for _, w := range l.writers {
 		w.Write([]byte(line))
 	}
@@ -54,8 +72,23 @@ func (l *Logger) Log(format string, args ...any) {
 
 func (l *Logger) TaskLog(taskID string, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	l.Log("[task:%s] %s", taskID, msg)
+	l.logRaw(fmt.Sprintf("[%s] [task:%s] %s\n", time.Now().Format("15:04:05"), taskID, msg))
 	l.writeTaskLog(taskID, msg)
+}
+
+// logRaw writes a pre-formatted line to all writers and listeners.
+func (l *Logger) logRaw(line string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, w := range l.writers {
+		w.Write([]byte(line))
+	}
+	for _, ch := range l.listeners {
+		select {
+		case ch <- line:
+		default:
+		}
+	}
 }
 
 func (l *Logger) writeTaskLog(taskID string, msg string) {
@@ -98,7 +131,9 @@ func (l *Logger) Close() error {
 	return l.file.Close()
 }
 
-func ReadLog(date string) ([]string, error) {
+// ReadLog reads the orchestrator log for a date, optionally filtered by level.
+// Level can be "all" (default), "orc" (orchestrator only), or "task" (task events only).
+func ReadLog(date string, level string) ([]string, error) {
 	logPath := filepath.Join(config.OrcDir(), "logs", fmt.Sprintf("orc-%s.log", date))
 	f, err := os.Open(logPath)
 	if err != nil {
@@ -111,12 +146,56 @@ func ReadLog(date string) ([]string, error) {
 	var lines []string
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+		line := scanner.Text()
+		if matchesLevel(line, level) {
+			lines = append(lines, line)
+		}
 	}
 	return lines, scanner.Err()
 }
 
-func StreamLog(date string, follow bool) (<-chan string, func(), error) {
+// ReadTaskLog reads the interleaved orchestrator task logs and agent output for a task.
+// Orchestrator lines get [orc] prefix, agent output lines are shown as-is.
+func ReadTaskLog(taskID string) ([]string, error) {
+	var lines []string
+
+	// Read orchestrator task log
+	taskLogPath := filepath.Join(config.OrcDir(), "logs", fmt.Sprintf("task-%s.log", taskID))
+	if data, err := os.ReadFile(taskLogPath); err == nil {
+		for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+			if line != "" {
+				lines = append(lines, "[orc] "+line)
+			}
+		}
+	}
+
+	// Read agent output
+	outputPath := filepath.Join(config.OrcDir(), "workdirs", taskID, "output.log")
+	if data, err := os.ReadFile(outputPath); err == nil {
+		for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+			lines = append(lines, line)
+		}
+	}
+
+	if len(lines) == 0 {
+		return nil, fmt.Errorf("no logs found for task %s\n\n  The task may not have started yet, or the log files were removed.", taskID)
+	}
+
+	return lines, nil
+}
+
+func matchesLevel(line string, level string) bool {
+	switch level {
+	case "orc":
+		return strings.Contains(line, "[orc]") || strings.Contains(line, "[sched]")
+	case "task":
+		return strings.Contains(line, "[task:")
+	default:
+		return true
+	}
+}
+
+func StreamLog(date string, follow bool, level string) (<-chan string, func(), error) {
 	logPath := filepath.Join(config.OrcDir(), "logs", fmt.Sprintf("orc-%s.log", date))
 	f, err := os.Open(logPath)
 	if err != nil {
@@ -134,8 +213,12 @@ func StreamLog(date string, follow bool) (<-chan string, func(), error) {
 		defer close(ch)
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
+			line := scanner.Text()
+			if !matchesLevel(line, level) {
+				continue
+			}
 			select {
-			case ch <- scanner.Text():
+			case ch <- line:
 			case <-done:
 				return
 			}
@@ -149,7 +232,10 @@ func StreamLog(date string, follow bool) (<-chan string, func(), error) {
 				return
 			case <-time.After(500 * time.Millisecond):
 				if scanner.Scan() {
-					ch <- scanner.Text()
+					line := scanner.Text()
+					if matchesLevel(line, level) {
+						ch <- line
+					}
 				}
 			}
 		}

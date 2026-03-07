@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -67,11 +68,19 @@ var (
 			Foreground(lipgloss.Color("226"))
 )
 
+type notificationType int
+
+const (
+	notifyNotes notificationType = iota
+	notifyGitChanges
+)
+
 type notification struct {
 	TaskID  string
 	Prompt  string
 	WorkDir string // absolute path to .orc/workdirs/<task-id>
-	Summary string // first non-empty line of NOTES.md
+	Summary string // first non-empty line of NOTES.md, or git diff stat
+	Type    notificationType
 }
 
 type viewMode int
@@ -80,6 +89,7 @@ const (
 	viewDashboard viewMode = iota
 	viewTaskOutput
 	viewNotes
+	viewGitDiff
 )
 
 type model struct {
@@ -104,6 +114,9 @@ type model struct {
 
 	// Live agent status
 	taskStatuses map[string]string
+
+	// Git diff stat cache (only check once per task)
+	gitDiffCache map[string]string // taskID -> diff stat (empty string = no changes)
 
 	// Search state
 	searchActive  bool
@@ -154,7 +167,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.mode {
 		case viewDashboard:
 			return m.updateDashboard(msg)
-		case viewTaskOutput, viewNotes:
+		case viewTaskOutput, viewNotes, viewGitDiff:
 			return m.updateTaskOutput(msg)
 		}
 	case tea.WindowSizeMsg:
@@ -219,6 +232,24 @@ func (m *model) refreshTaskList() {
 				Prompt:  t.Prompt,
 				WorkDir: workDir,
 				Summary: summary,
+				Type:    notifyNotes,
+			})
+		}
+		if m.gitDiffCache == nil {
+			m.gitDiffCache = make(map[string]string)
+		}
+		diffStat, checked := m.gitDiffCache[t.ID]
+		if !checked {
+			diffStat = gitDiffStat(workDir)
+			m.gitDiffCache[t.ID] = diffStat
+		}
+		if diffStat != "" {
+			m.notifications = append(m.notifications, notification{
+				TaskID:  t.ID,
+				Prompt:  t.Prompt,
+				WorkDir: workDir,
+				Summary: diffStat,
+				Type:    notifyGitChanges,
 			})
 		}
 	}
@@ -276,11 +307,17 @@ func (m model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Check if cursor is on a notification
 			notifIdx := m.cursor - m.notificationStart
 			if notifIdx >= 0 && notifIdx < len(m.notifications) {
-				m.viewTaskID = m.notifications[notifIdx].TaskID
+				n := m.notifications[notifIdx]
+				m.viewTaskID = n.TaskID
 				m.outputLines = nil
 				m.outputScroll = 0
-				m.loadNotes()
-				m.mode = viewNotes
+				if n.Type == notifyGitChanges {
+					m.loadGitDiff(n.WorkDir)
+					m.mode = viewGitDiff
+				} else {
+					m.loadNotes()
+					m.mode = viewNotes
+				}
 			} else {
 				m.viewTaskID = m.taskList[m.cursor].ID
 				m.outputLines = nil
@@ -447,6 +484,16 @@ func (m *model) loadOutput() {
 	}
 }
 
+func (m *model) loadGitDiff(workDir string) {
+	cmd := exec.Command("git", "-C", workDir, "diff", "--stat", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		m.outputLines = []string{"(no git changes)"}
+		return
+	}
+	m.outputLines = strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+}
+
 func (m *model) loadNotes() {
 	notesPath := filepath.Join(config.OrcDir(), "workdirs", m.viewTaskID, "NOTES.md")
 	f, err := os.Open(notesPath)
@@ -492,7 +539,7 @@ func (m model) View() string {
 		return "Shutting down orc...\n"
 	}
 	switch m.mode {
-	case viewTaskOutput, viewNotes:
+	case viewTaskOutput, viewNotes, viewGitDiff:
 		return m.viewTaskOutputScreen()
 	default:
 		return m.viewDashboardScreen()
@@ -554,7 +601,11 @@ func (m model) viewDashboardScreen() string {
 		b.WriteString(notificationStyle.Render(fmt.Sprintf("Notifications (%d)", len(m.notifications))))
 		b.WriteString("\n")
 		for i, n := range m.notifications {
-			line := fmt.Sprintf("  %s %s  %s", "!", n.TaskID, config.Truncate(n.Summary, 55))
+			icon := "!"
+			if n.Type == notifyGitChanges {
+				icon = "Y"
+			}
+			line := fmt.Sprintf("  %s %s  %s", icon, n.TaskID, config.Truncate(n.Summary, 55))
 			if idx == m.cursor {
 				b.WriteString(selectedStyle.Render(lipgloss.NewStyle().Foreground(lipgloss.Color("213")).Render(line)))
 			} else {
@@ -562,7 +613,11 @@ func (m model) viewDashboardScreen() string {
 			}
 			b.WriteString("\n")
 			if idx == m.cursor {
-				b.WriteString(dimStyle.Render(fmt.Sprintf("     cd %s && cat NOTES.md", m.notifications[i].WorkDir)))
+				if n.Type == notifyGitChanges {
+					b.WriteString(dimStyle.Render(fmt.Sprintf("     cd %s && git diff", m.notifications[i].WorkDir)))
+				} else {
+					b.WriteString(dimStyle.Render(fmt.Sprintf("     cd %s && cat NOTES.md", m.notifications[i].WorkDir)))
+				}
 				b.WriteString("\n")
 			}
 			idx++
@@ -656,9 +711,12 @@ func (m model) viewTaskOutputScreen() string {
 	var b strings.Builder
 
 	// Show task ID and full prompt
-	if m.mode == viewNotes {
+	switch m.mode {
+	case viewNotes:
 		b.WriteString(detailTitleStyle.Render(fmt.Sprintf("Task %s — Notes", m.viewTaskID)))
-	} else {
+	case viewGitDiff:
+		b.WriteString(detailTitleStyle.Render(fmt.Sprintf("Task %s — Git Changes", m.viewTaskID)))
+	default:
 		b.WriteString(detailTitleStyle.Render(fmt.Sprintf("Task %s", m.viewTaskID)))
 	}
 	b.WriteString("\n")
